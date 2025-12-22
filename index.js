@@ -206,6 +206,43 @@ async function startNormalMode() {
   }
 }
 
+// Optional packages (only needed for specific features)
+const optionalPackages = {
+  discord: ['discord.js', '@discordjs/voice']
+};
+
+/**
+ * Check optional packages and warn if missing
+ */
+function checkOptionalNpmPackages() {
+  function isPackageInstalled(packageName) {
+    try {
+      require.resolve(packageName);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  // Check Discord packages (only warn, don't fail)
+  const discordMissing = [];
+  for (const pkg of optionalPackages.discord) {
+    if (!isPackageInstalled(pkg)) {
+      discordMissing.push(pkg);
+    }
+  }
+  
+  if (discordMissing.length > 0) {
+    console.log('');
+    console.log('[Startup] NOTE: Discord packages are missing:', discordMissing.join(', '));
+    console.log('[Startup] This is OK if you are not using Discord features.');
+    if (discordMissing.some(p => p.includes('opus'))) {
+      console.log('[Startup] @discordjs/opus requires Visual Studio build tools to compile.');
+      console.log('[Startup] Install: https://visualstudio.microsoft.com/downloads/');
+    }
+  }
+}
+
 /**
  * Fallback: Manual package installation (like installer does)
  */
@@ -213,36 +250,67 @@ function attemptManualNpmInstall() {
   const { spawn } = require('child_process');
   
   return new Promise((resolve, reject) => {
-    const packages = [
+    // Core packages (required for basic functionality)
+    const corePackages = [
       'dotenv', 'express', 'sqlite3', 'bcrypt', 'uuid', 'busboy', 'winston',
-      'moment-timezone', 'discord.js', '@discordjs/voice', 'prism-media',
-      'node-fetch@2', 'socket.io', 'csv-parser', 'form-data', 'aws-sdk',
-      'libsodium-wrappers', 'node-cache', 'openai', 'public-ip', 'axios',
-      'multer', 'archiver'
+      'moment-timezone', 'prism-media', 'node-fetch@2', 'socket.io',
+      'csv-parser', 'form-data', 'aws-sdk', 'libsodium-wrappers', 'node-cache',
+      'openai', 'public-ip', 'axios', 'multer', 'archiver'
     ];
     
-    console.log('[Startup] Installing packages manually...');
-    const installProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...packages], {
+    // Discord packages (optional, may fail on Windows without build tools)
+    const discordPackages = ['discord.js', '@discordjs/voice'];
+    
+    console.log('[Startup] Installing core packages manually...');
+    const installProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...corePackages], {
       stdio: 'inherit',
-      shell: true,
       cwd: __dirname
     });
     
     installProcess.on('close', (code) => {
       if (code === 0) {
-        resolve();
+        // Core packages installed, try Discord packages separately
+        console.log('');
+        console.log('[Startup] Installing Discord packages (optional)...');
+        const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
+          stdio: 'inherit',
+          cwd: __dirname
+        });
+        
+        discordProcess.on('close', (discordCode) => {
+          if (discordCode === 0) {
+            resolve();
+          } else {
+            console.log('');
+            console.log('[Startup] WARNING: Discord packages failed to install (this is OK if not using Discord)');
+            console.log('[Startup] If you need Discord features, install Visual Studio build tools:');
+            console.log('[Startup] https://visualstudio.microsoft.com/downloads/');
+            // Still resolve - core packages are installed
+            resolve();
+          }
+        });
+        
+        discordProcess.on('error', () => {
+          // Continue even if Discord install fails
+          resolve();
+        });
       } else {
         // Try one more time (like installer does)
         console.log('[Startup] First attempt failed, retrying...');
-        const retryProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...packages], {
+        const retryProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...corePackages], {
           stdio: 'inherit',
-          shell: true,
           cwd: __dirname
         });
         
         retryProcess.on('close', (retryCode) => {
           if (retryCode === 0) {
-            resolve();
+            // Try Discord packages
+            const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
+              stdio: 'inherit',
+              cwd: __dirname
+            });
+            discordProcess.on('close', () => resolve());
+            discordProcess.on('error', () => resolve());
           } else {
             reject(new Error('Manual installation failed after retry'));
           }
@@ -261,7 +329,8 @@ function attemptManualNpmInstall() {
  */
 async function ensureNpmDependencies() {
   const nodeModulesPath = path.join(__dirname, 'node_modules');
-  const criticalPackages = ['express', 'discord.js', 'sqlite3', 'dotenv', 'winston'];
+  // Critical packages (core functionality) - discord.js is optional
+  const criticalPackages = ['express', 'sqlite3', 'dotenv', 'winston'];
   
   // Function to check if a package is installed
   function isPackageInstalled(packageName) {
@@ -301,63 +370,32 @@ async function ensureNpmDependencies() {
     await new Promise((resolve) => {
       const cacheProcess = spawn('npm', ['cache', 'clean', '--force'], {
         stdio: 'pipe',
-        shell: true,
         cwd: __dirname
       });
       cacheProcess.on('close', resolve);
       cacheProcess.on('error', resolve); // Continue even if cache clear fails
     });
     
-    // Step 2: Try installing from package.json first (with --no-audit --no-fund like installer)
+    // Step 2: Try installing from package.json first (with --legacy-peer-deps like installer)
     return new Promise((resolve, reject) => {
       console.log('[Startup] Installing from package.json...');
-      const installProcess = spawn('npm', ['install', '--no-audit', '--no-fund'], {
+      const installProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund'], {
         stdio: 'inherit',
-        shell: true,
         cwd: __dirname
       });
       
       installProcess.on('close', (code) => {
-        if (code === 0) {
-          // Verify packages are installed
-          const stillMissing = [];
-          for (const pkg of criticalPackages) {
-            if (!isPackageInstalled(pkg)) {
-              stillMissing.push(pkg);
-            }
+        // Verify critical packages are installed (even if exit code is non-zero)
+        const stillMissing = [];
+        for (const pkg of criticalPackages) {
+          if (!isPackageInstalled(pkg)) {
+            stillMissing.push(pkg);
           }
-          
-          if (stillMissing.length > 0) {
-            console.log('');
-            console.log('[Startup] Some packages still missing, trying manual installation...');
-            attemptManualNpmInstall()
-              .then(() => {
-                const finalMissing = [];
-                for (const pkg of criticalPackages) {
-                  if (!isPackageInstalled(pkg)) {
-                    finalMissing.push(pkg);
-                  }
-                }
-                if (finalMissing.length > 0) {
-                  console.error('[Startup] WARNING: Some packages may still be missing:', finalMissing.join(', '));
-                  console.error('[Startup] Try running: npm install --legacy-peer-deps');
-                }
-                console.log('');
-                console.log('[Startup] Dependencies installation completed!');
-                console.log('');
-                resolve();
-              })
-              .catch(reject);
-          } else {
-            console.log('');
-            console.log('[Startup] Dependencies installed successfully!');
-            console.log('');
-            resolve();
-          }
-        } else {
-          // Package.json install failed, try manual installation
+        }
+        
+        if (stillMissing.length > 0) {
           console.log('');
-          console.log('[Startup] Package.json install failed, trying manual installation...');
+          console.log('[Startup] Some critical packages still missing, trying manual installation...');
           attemptManualNpmInstall()
             .then(() => {
               const finalMissing = [];
@@ -367,15 +405,28 @@ async function ensureNpmDependencies() {
                 }
               }
               if (finalMissing.length > 0) {
-                console.error('[Startup] WARNING: Some packages may still be missing:', finalMissing.join(', '));
+                console.error('[Startup] WARNING: Some critical packages may still be missing:', finalMissing.join(', '));
                 console.error('[Startup] Try running: npm install --legacy-peer-deps');
               }
+              // Check optional packages
+              checkOptionalNpmPackages();
               console.log('');
               console.log('[Startup] Dependencies installation completed!');
               console.log('');
               resolve();
             })
             .catch(reject);
+        } else {
+          // Critical packages are installed
+          // Check optional packages
+          checkOptionalNpmPackages();
+          console.log('');
+          console.log('[Startup] Critical dependencies installed successfully!');
+          if (code !== 0) {
+            console.log('[Startup] Some optional packages may have failed (this is OK if not using those features)');
+          }
+          console.log('');
+          resolve();
         }
       });
       
