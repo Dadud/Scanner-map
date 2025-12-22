@@ -203,7 +203,7 @@ app.get('/api/setup/counties/:state', (req, res) => {
   }
 });
 
-// Find counties within 50 miles of a location
+// Find counties within 20 miles of a location
 app.post('/api/setup/counties-within-radius', async (req, res) => {
   try {
     const { lat, lng, stateCode } = req.body;
@@ -224,11 +224,6 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
       return res.json({ counties: [], centerCounty: null });
     }
     
-    // Use reverse geocoding to find the county at the center point
-    // Then approximate which counties are within 50 miles
-    // For now, we'll use a simple heuristic: select counties based on state center proximity
-    // In a production system, you'd use actual county boundary data or geocoding API
-    
     // Calculate distance using Haversine formula
     function distance(lat1, lon1, lat2, lon2) {
       const R = 3959; // Earth radius in miles
@@ -241,76 +236,108 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
       return R * c;
     }
     
-    // Get state center for approximation
-    const stateCentersPath = path.join(__dirname, 'data', 'state-centers.json');
-    let stateCenter = null;
-    if (fs.existsSync(stateCentersPath)) {
-      const stateCenters = JSON.parse(fs.readFileSync(stateCentersPath, 'utf8'));
-      stateCenter = stateCenters[stateCode.toUpperCase()];
-    }
-    
-    // For each county, we'll approximate its location
-    // Since we don't have exact coordinates, we'll use a simple approach:
-    // Select counties that would be within 50 miles based on state center + distribution
-    
-    // If we have state center, distribute counties around it
-    // Otherwise, just select all counties (fallback)
-    const selectedCounties = [];
     const radiusMiles = 20;
+    const selectedCounties = [];
+    const countyCoordinates = new Map(); // Cache county coordinates
     
-    if (stateCenter) {
-      // Calculate distance from center point to state center
-      const distToStateCenter = distance(lat, lng, stateCenter[0], stateCenter[1]);
-      
-      // Approximate county positions by dividing state into grid
-      const countyCount = counties.length;
-      const gridSize = Math.ceil(Math.sqrt(countyCount));
-      
-      // Estimate state size (rough approximation: assume state is roughly square)
-      // Use a larger area to ensure we cover the state
-      const estimatedStateSizeMiles = Math.max(200, distToStateCenter * 2 + radiusMiles * 2);
-      
-      // Calculate distances for all counties and sort
-      const countyDistances = counties.map((county, index) => {
-        const row = Math.floor(index / gridSize);
-        const col = index % gridSize;
-        
-        // Calculate offsets from state center
-        const latOffset = (row - gridSize/2) * (estimatedStateSizeMiles / gridSize) / 69; // ~69 miles per degree lat
-        const lngOffset = (col - gridSize/2) * (estimatedStateSizeMiles / gridSize) / (69 * Math.cos(stateCenter[0] * Math.PI / 180));
-        
-        const approxLat = stateCenter[0] + latOffset;
-        const approxLng = stateCenter[1] + lngOffset;
-        
-        return {
-          county,
-          distance: distance(lat, lng, approxLat, approxLng)
-        };
-      });
-      
-      // Select counties within radius
-      countyDistances.forEach(item => {
-        if (item.distance <= radiusMiles) {
-          selectedCounties.push(item.county);
+    // First, use reverse geocoding to find the county at the user's location
+    const { reverseGeocode } = require('./setup-detection');
+    const reverseResult = await reverseGeocode(lat, lng);
+    let centerCounty = null;
+    
+    if (reverseResult.success && reverseResult.city) {
+      // Try to match the reverse geocoded location to a county name
+      // Nominatim sometimes returns county in the address
+      const addressParts = reverseResult.fullAddress?.toLowerCase() || '';
+      for (const county of counties) {
+        if (addressParts.includes(county.toLowerCase())) {
+          centerCounty = county;
+          break;
         }
-      });
-      
-      // If no counties selected (maybe center is near edge), select closest ones
-      if (selectedCounties.length === 0) {
-        countyDistances.sort((a, b) => a.distance - b.distance);
-        const closest = countyDistances.slice(0, Math.min(5, countyDistances.length));
-        selectedCounties.push(...closest.map(c => c.county));
       }
-    } else {
-      // Fallback: select first few counties (better than nothing)
-      selectedCounties.push(...counties.slice(0, Math.min(5, counties.length)));
     }
     
-    // Also try to find the center county using reverse geocoding if possible
-    // For now, return the selected counties
+    // Use Nominatim to geocode each county and calculate distances
+    // Limit to reasonable number to avoid rate limits
+    const maxCountiesToCheck = Math.min(counties.length, 50);
+    const countiesToCheck = counties.slice(0, maxCountiesToCheck);
+    
+    console.log(`[Setup] Checking ${countiesToCheck.length} counties for location (${lat}, ${lng})`);
+    
+    for (const county of countiesToCheck) {
+      try {
+        // Check cache first
+        let countyLat, countyLng;
+        if (countyCoordinates.has(county)) {
+          [countyLat, countyLng] = countyCoordinates.get(county);
+        } else {
+          // Geocode county to get its coordinates
+          const query = `${county} County, ${stateCode}, USA`;
+          const fetch = require('node-fetch');
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          
+          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&addressdetails=1`, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'Scanner-Map-Setup/1.0'
+            }
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (data && data.length > 0) {
+              countyLat = parseFloat(data[0].lat);
+              countyLng = parseFloat(data[0].lon);
+              countyCoordinates.set(county, [countyLat, countyLng]);
+            } else {
+              continue; // Skip if no results
+            }
+          } else {
+            continue; // Skip on error
+          }
+          
+          // Rate limit: 1 request per second for Nominatim
+          await new Promise(resolve => setTimeout(resolve, 1100));
+        }
+        
+        // Calculate distance from user location to county
+        if (countyLat && countyLng) {
+          const dist = distance(lat, lng, countyLat, countyLng);
+          if (dist <= radiusMiles) {
+            selectedCounties.push({ county, distance: dist });
+          }
+        }
+      } catch (error) {
+        // Skip county on error, continue with next
+        console.warn(`[Setup] Error geocoding county ${county}:`, error.message);
+      }
+    }
+    
+    // Sort by distance and extract county names
+    selectedCounties.sort((a, b) => a.distance - b.distance);
+    const countyNames = selectedCounties.map(item => item.county);
+    
+    // If we found a center county from reverse geocoding, ensure it's included
+    if (centerCounty && !countyNames.includes(centerCounty)) {
+      countyNames.unshift(centerCounty);
+    }
+    
+    // If no counties found, try a broader search or return the center county
+    if (countyNames.length === 0) {
+      if (centerCounty) {
+        countyNames.push(centerCounty);
+      } else {
+        // Fallback: return closest counties by name matching (less accurate)
+        console.warn('[Setup] No counties found within radius, using fallback');
+      }
+    }
+    
     res.json({ 
-      counties: selectedCounties,
-      centerCounty: selectedCounties[0] || null,
+      counties: countyNames,
+      centerCounty: centerCounty || countyNames[0] || null,
       radius: radiusMiles
     });
   } catch (error) {
