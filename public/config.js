@@ -192,5 +192,65 @@ async function fetchGeocodingConfig() {
 // Fetch the geocoding configuration when the config is loaded
 fetchGeocodingConfig();
 
+// Fetch map configuration from server (overrides defaults with setup values)
+let mapConfigLoaded = false;
+let mapConfigPromise = null;
+
+async function fetchMapConfig() {
+  if (mapConfigPromise) return mapConfigPromise;
+  
+  mapConfigPromise = (async () => {
+    try {
+      const response = await fetch('/api/config/map');
+      const mapConfig = await response.json();
+      
+      if (mapConfig.center && Array.isArray(mapConfig.center) && mapConfig.center.length === 2) {
+        config.map.defaultCenter = mapConfig.center;
+        console.log('[Config] Map center loaded from setup:', mapConfig.center);
+      }
+      
+      if (mapConfig.zoom && typeof mapConfig.zoom === 'number') {
+        config.map.defaultZoom = mapConfig.zoom;
+        console.log('[Config] Map zoom loaded from setup:', mapConfig.zoom);
+      }
+      
+      if (mapConfig.maxZoom && typeof mapConfig.maxZoom === 'number') {
+        config.map.maxZoom = mapConfig.maxZoom;
+      }
+      
+      if (mapConfig.minZoom && typeof mapConfig.minZoom === 'number') {
+        config.map.minZoom = mapConfig.minZoom;
+      }
+      
+      if (mapConfig.timezone) {
+        config.map.timeZone = mapConfig.timezone;
+        console.log('[Config] Timezone loaded from setup:', mapConfig.timezone);
+      }
+      
+      // Also update geocoding default area to match map center
+      if (mapConfig.center && Array.isArray(mapConfig.center) && mapConfig.center.length === 2) {
+        config.geocoding.defaultArea.lat = mapConfig.center[0];
+        config.geocoding.defaultArea.lng = mapConfig.center[1];
+        if (config.geocoding.locationiq && config.geocoding.locationiq.bias) {
+          config.geocoding.locationiq.bias.lat = mapConfig.center[0];
+          config.geocoding.locationiq.bias.lon = mapConfig.center[1];
+        }
+      }
+      
+      mapConfigLoaded = true;
+    } catch (error) {
+      console.warn('[Config] Could not load map configuration from server, using defaults:', error);
+      mapConfigLoaded = true; // Mark as loaded even on error to avoid blocking
+    }
+  })();
+  
+  return mapConfigPromise;
+}
+
+// Start fetching map config immediately
+fetchMapConfig();
+
 // Export the configuration
 window.appConfig = config;
+window.mapConfigLoaded = () => mapConfigLoaded;
+window.waitForMapConfig = () => mapConfigPromise || Promise.resolve();

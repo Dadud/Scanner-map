@@ -165,6 +165,21 @@ body {
   margin-top: 6px;
 }
 
+/* Inline field validation (Phase 4) */
+input.field-error,
+select.field-error,
+textarea.field-error {
+  border-color: var(--error) !important;
+  box-shadow: 0 0 0 3px rgba(255, 68, 68, 0.1) !important;
+}
+
+.field-error-message {
+  color: var(--error);
+  font-size: 0.85em;
+  margin-top: 4px;
+  display: block;
+}
+
 /* Buttons */
 .btn {
   padding: 12px 24px;
@@ -435,6 +450,109 @@ body {
   width: 18px;
   height: 18px;
   accent-color: var(--primary);
+}
+
+/* County Selection List */
+.county-list-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.county-item {
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.county-item:last-child {
+  border-bottom: none;
+}
+
+.county-item:hover {
+  background: var(--surface-light);
+}
+
+.county-item input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin-right: 12px;
+  cursor: pointer;
+  accent-color: var(--primary);
+  flex-shrink: 0;
+}
+
+.county-item input[type="checkbox"]:checked {
+  accent-color: var(--primary);
+}
+
+.county-item.selected {
+  background: rgba(0, 255, 136, 0.1);
+  border-left: 3px solid var(--primary);
+}
+
+.county-item.selected:hover {
+  background: rgba(0, 255, 136, 0.15);
+}
+
+.county-name {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text);
+  user-select: none;
+}
+
+.county-item input[type="checkbox"]:checked ~ .county-name {
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.county-search-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  margin-bottom: 12px;
+  transition: border-color 0.2s;
+}
+
+.county-search-input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.county-list-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.county-list-loading {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.county-list-loading::after {
+  content: '...';
+  animation: dots 1.5s steps(4, end) infinite;
+}
+
+@keyframes dots {
+  0%, 20% { content: '.'; }
+  40% { content: '..'; }
+  60%, 100% { content: '...'; }
 }
 
 .talkgroup-id {

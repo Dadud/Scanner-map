@@ -161,6 +161,19 @@ Other files:
 
 ---
 
+## 🧪 Testing
+
+Comprehensive test suite available in the `tests/` subfolder:
+
+```bash
+npm test                    # Run all tests
+npm run test:verify        # Verify test framework setup
+npm run test:server        # Web-based test interface (http://localhost:8768)
+npm run test:regression    # Run regression tests
+```
+
+See [tests/README.md](tests/README.md) for full testing documentation.
+
 ## 🛠 Troubleshooting
 - Logs: `combined.log` and `error.log`  
 - Check `.env` values (especially API keys and modes)  

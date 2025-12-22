@@ -44,3 +44,11 @@ __pycache__/
 dist/
 build/
 
+# Test artifacts (test files themselves are committed)
+tests/*.db
+tests/test-*.db
+tests/*-test.db
+tests/test-storage/
+tests/tmp/
+tests/regression-baseline.json
+

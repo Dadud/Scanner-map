@@ -703,6 +703,68 @@ function Import-Talkgroups {
 }
 
 # *** UPDATED FUNCTION ***
+function Create-Shortcuts {
+    Print-Message "Creating desktop shortcuts..."
+    Set-Location $InstallDir
+    
+    # Ensure the launcher batch file exists (it should be in the repo)
+    $launcherBat = Join-Path $InstallDir "Start Scanner Map.bat"
+    if (-not (Test-Path $launcherBat)) {
+        Write-Warning "Launcher batch file not found. Creating it..."
+        $batContent = @"
+@echo off
+REM Scanner Map Launcher for Windows
+cd /d "%~dp0"
+if not exist "node_modules" (
+    echo Installing dependencies...
+    call npm install --legacy-peer-deps
+)
+npm start
+pause
+"@
+        Set-Content -Path $launcherBat -Value $batContent -Encoding ASCII
+    }
+    
+    # Ask user if they want shortcuts
+    if (Prompt-YesNo "Would you like to create a desktop shortcut to launch Scanner Map?") {
+        try {
+            $WshShell = New-Object -ComObject WScript.Shell
+            $DesktopPath = [Environment]::GetFolderPath("Desktop")
+            $ShortcutPath = Join-Path $DesktopPath "Scanner Map.lnk"
+            
+            $Shortcut = $WshShell.CreateShortcut($ShortcutPath)
+            $Shortcut.TargetPath = $launcherBat
+            $Shortcut.WorkingDirectory = $InstallDir
+            $Shortcut.Description = "Launch Scanner Map - Real-time radio call mapping system"
+            $Shortcut.Save()
+            
+            Write-Host "Desktop shortcut created successfully!" -ForegroundColor Green
+            
+            # Also create Start Menu shortcut
+            $StartMenuPath = [Environment]::GetFolderPath("StartMenu")
+            $ProgramsPath = Join-Path $StartMenuPath "Programs"
+            if (-not (Test-Path $ProgramsPath)) {
+                New-Item -ItemType Directory -Force -Path $ProgramsPath | Out-Null
+            }
+            $StartMenuShortcut = Join-Path $ProgramsPath "Scanner Map.lnk"
+            $StartMenuShortcutObj = $WshShell.CreateShortcut($StartMenuShortcut)
+            $StartMenuShortcutObj.TargetPath = $launcherBat
+            $StartMenuShortcutObj.WorkingDirectory = $InstallDir
+            $StartMenuShortcutObj.Description = "Launch Scanner Map - Real-time radio call mapping system"
+            $StartMenuShortcutObj.Save()
+            
+            Write-Host "Start Menu shortcut created successfully!" -ForegroundColor Green
+            Write-Host "You can now launch Scanner Map by double-clicking the desktop shortcut or finding it in the Start Menu." -ForegroundColor Cyan
+        } catch {
+            Write-Warning "Failed to create shortcuts: $($_.Exception.Message)"
+            Write-Host "You can still launch Scanner Map using: cd $InstallDir; .\Start Scanner Map.bat" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "Skipping shortcut creation." -ForegroundColor Yellow
+        Write-Host "You can launch Scanner Map using: cd $InstallDir; .\Start Scanner Map.bat" -ForegroundColor Cyan
+    }
+}
+
 function Manual-StepsReminder {
     Print-Message "--- MANUAL CONFIGURATION REQUIRED ---"
     Write-Host "The script has completed the automated steps and created a base .env file." -ForegroundColor Yellow
@@ -749,8 +811,14 @@ function Manual-StepsReminder {
     Write-Host ""
     Write-Host "--- HOW TO RUN (NEW INTEGRATED MODE) ---" -ForegroundColor Magenta
     Write-Host "IMPORTANT: The bot now handles everything automatically!" -ForegroundColor Green
-    Write-Host "1. Open PowerShell/CMD: cd $InstallDir"
-    Write-Host "   node bot.js"
+    Write-Host ""
+    Write-Host "OPTION 1 (Easiest): Double-click the desktop shortcut 'Scanner Map'" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "OPTION 2 (Manual): Open PowerShell/CMD:" -ForegroundColor Cyan
+    Write-Host "   cd $InstallDir"
+    Write-Host "   .\Start Scanner Map.bat"
+    Write-Host ""
+    Write-Host "OPTION 3 (Advanced): cd $InstallDir; node index.js"
     Write-Host ""
     Write-Host "The bot will now automatically:" -ForegroundColor Yellow
     Write-Host "  ✅ Create database and tables" -ForegroundColor Green
@@ -782,6 +850,7 @@ Install-NodeDeps
 Setup-PythonDeps # Will use $script:PyTorchDevice set earlier
 Create-Dirs
 Import-Talkgroups # Uses updated function
+Create-Shortcuts # Create desktop and Start Menu shortcuts
 Manual-StepsReminder # Uses updated function
 
 Print-Message "Installation script finished. Please complete the manual configuration steps."

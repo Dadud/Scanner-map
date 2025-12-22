@@ -1,0 +1,119 @@
+{
+  "locationiq": {
+    "valid_address": {
+      "lat": "39.2904",
+      "lon": "-76.6122",
+      "display_name": "123 Main Street, Baltimore, MD 21201, USA",
+      "type": "house",
+      "class": "place",
+      "address": {
+        "road": "Main Street",
+        "house_number": "123",
+        "city": "Baltimore",
+        "county": "Baltimore City",
+        "state": "Maryland",
+        "postcode": "21201",
+        "country": "United States"
+      }
+    },
+    "outside_county": {
+      "lat": "40.7128",
+      "lon": "-74.0060",
+      "display_name": "999 Remote Street, New York, NY 10001, USA",
+      "type": "house",
+      "class": "place",
+      "address": {
+        "road": "Remote Street",
+        "house_number": "999",
+        "city": "New York",
+        "county": "New York County",
+        "state": "New York",
+        "postcode": "10001",
+        "country": "United States"
+      }
+    },
+    "city_level": {
+      "lat": "39.2904",
+      "lon": "-76.6122",
+      "display_name": "Baltimore, MD, USA",
+      "type": "city",
+      "class": "place",
+      "address": {
+        "city": "Baltimore",
+        "county": "Baltimore City",
+        "state": "Maryland",
+        "country": "United States"
+      }
+    }
+  },
+  "google": {
+    "valid_address": {
+      "formatted_address": "123 Main Street, Baltimore, MD 21201, USA",
+      "geometry": {
+        "location": {
+          "lat": 39.2904,
+          "lng": -76.6122
+        }
+      },
+      "types": ["street_address", "premise"],
+      "address_components": [
+        {
+          "long_name": "123",
+          "short_name": "123",
+          "types": ["street_number"]
+        },
+        {
+          "long_name": "Main Street",
+          "short_name": "Main St",
+          "types": ["route"]
+        },
+        {
+          "long_name": "Baltimore",
+          "short_name": "Baltimore",
+          "types": ["locality", "political"]
+        },
+        {
+          "long_name": "Baltimore City",
+          "short_name": "Baltimore City",
+          "types": ["administrative_area_level_2", "political"]
+        },
+        {
+          "long_name": "Maryland",
+          "short_name": "MD",
+          "types": ["administrative_area_level_1", "political"]
+        },
+        {
+          "long_name": "United States",
+          "short_name": "US",
+          "types": ["country", "political"]
+        },
+        {
+          "long_name": "21201",
+          "short_name": "21201",
+          "types": ["postal_code"]
+        }
+      ]
+    }
+  },
+  "nominatim": {
+    "valid_address": {
+      "lat": "39.2904",
+      "lon": "-76.6122",
+      "display_name": "123 Main Street, Baltimore, MD 21201, USA",
+      "type": "house",
+      "importance": 0.9,
+      "address": {
+        "road": "Main Street",
+        "house_number": "123",
+        "city": "Baltimore",
+        "county": "Baltimore City",
+        "state": "Maryland",
+        "state_code": "MD",
+        "postcode": "21201",
+        "country": "United States",
+        "country_code": "us"
+      }
+    }
+  }
+}
+

@@ -99,6 +99,36 @@ app.get('/api/config/geocoding', (req, res) => {
   });
 });
 
+// Add endpoint to serve map configuration (public, no auth required)
+app.get('/api/config/map', (req, res) => {
+  // Try to get map config from config manager if available
+  if (configManager) {
+    try {
+      const config = configManager.getAll();
+      if (config.map && config.map.center && config.map.zoom) {
+        return res.json({
+          center: config.map.center,
+          zoom: config.map.zoom,
+          maxZoom: config.map.maxZoom || 18,
+          minZoom: config.map.minZoom || 6,
+          timezone: config.server?.timezone || 'America/New_York'
+        });
+      }
+    } catch (error) {
+      console.error('[Webserver] Error getting map config from config manager:', error);
+    }
+  }
+  
+  // Fallback to defaults if config manager not available or config not set
+  res.json({
+    center: [39.078925, -76.933018], // Default center
+    zoom: 13,
+    maxZoom: 18,
+    minZoom: 6,
+    timezone: TIMEZONE || 'America/New_York'
+  });
+});
+
 // Add endpoint to check if current user is admin
 app.get('/api/auth/is-admin', async (req, res) => {
   if (!authEnabled) {
@@ -1318,7 +1348,7 @@ setInterval(checkForLiveFeedCalls, 2500); // Poll for live feed slightly offset,
 
 // --- End Polling Logic ---
 
-// Server Startup
+// Server Startup with error handling
 server.listen(WEBSERVER_PORT, () => {
   console.log(`Web server running on port ${WEBSERVER_PORT}`);
   console.log(`Audio URL base: http://${PUBLIC_DOMAIN}:${WEBSERVER_PORT}/audio/`);
@@ -1329,6 +1359,30 @@ server.listen(WEBSERVER_PORT, () => {
     console.log(`Max sessions per user: ${MAX_SESSIONS}`);
   } else {
     console.log('Authentication: DISABLED');
+  }
+});
+
+// Handle port conflicts and other server errors
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error('');
+    console.error('═══════════════════════════════════════════════════════════');
+    console.error('  ERROR: Port ' + WEBSERVER_PORT + ' is already in use');
+    console.error('═══════════════════════════════════════════════════════════');
+    console.error('');
+    console.error('This usually means Scanner Map is already running.');
+    console.error('');
+    console.error('To fix this:');
+    console.error('  1. Check if Scanner Map is already running in another terminal');
+    console.error('  2. Or find and stop the process using port ' + WEBSERVER_PORT + ':');
+    console.error('     Windows: netstat -ano | findstr :' + WEBSERVER_PORT);
+    console.error('     Then: taskkill /PID <PID> /F');
+    console.error('  3. Or change WEBSERVER_PORT in your config to use a different port');
+    console.error('');
+    process.exit(1);
+  } else {
+    console.error('Server error:', err);
+    process.exit(1);
   }
 });
 

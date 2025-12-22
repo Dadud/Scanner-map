@@ -3911,10 +3911,23 @@ function setupSidebarToggle() {
 // REMOVED DOMContentLoaded listener - initializeApp is called directly now
 // document.addEventListener('DOMContentLoaded', initializeApp);
 
-document.addEventListener('DOMContentLoaded', initializeApp); // Re-add DOMContentLoaded listener
+document.addEventListener('DOMContentLoaded', async () => {
+    // Wait for map config to be loaded before initializing
+    if (window.waitForMapConfig) {
+        try {
+            await window.waitForMapConfig();
+        } catch (error) {
+            console.warn('[App] Error waiting for map config, proceeding with defaults:', error);
+        }
+    }
+    initializeApp();
+});
 
 function initializeApp() {
     console.log("[App] Initializing..."); // Add log
+    console.log("[App] Map will center at:", appConfig.map.defaultCenter);
+    console.log("[App] Map will use zoom level:", appConfig.map.defaultZoom);
+    
     // Initialize configuration variables from the config
     timeRangeHours = appConfig.time.defaultTimeRangeHours;
     heatmapIntensity = appConfig.heatmap.defaultIntensity;

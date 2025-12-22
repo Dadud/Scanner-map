@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner Map - Test Results</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1a1a1a;
+            color: #e0e0e0;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        h1 {
+            color: white;
+            font-size: 2em;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.9em;
+        }
+
+        .controls {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #3a3a3a;
+            color: #e0e0e0;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #4a4a4a;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-idle { background: #666; }
+        .status-running { background: #ffa500; animation: pulse 1.5s infinite; }
+        .status-completed { background: #4caf50; }
+        .status-error { background: #f44336; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .results {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+
+        .results h2 {
+            margin-bottom: 15px;
+            color: #667eea;
+        }
+
+        .output {
+            background: #1a1a1a;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 600px;
+            overflow-y: auto;
+            border: 1px solid #3a3a3a;
+        }
+
+        .output.success {
+            border-left: 4px solid #4caf50;
+        }
+
+        .output.error {
+            border-left: 4px solid #f44336;
+        }
+
+        .output.running {
+            border-left: 4px solid #ffa500;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #999;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .last-run {
+            color: #999;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #667eea;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .suite-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .suite-btn {
+            padding: 8px 16px;
+            font-size: 12px;
+        }
+
+        .suite-btn.active {
+            background: #667eea;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🧪 Scanner Map Test Suite</h1>
+            <p class="subtitle">Comprehensive testing framework for verifying all application features</p>
+        </header>
+
+        <div class="controls">
+            <button class="btn-primary" id="verifyBtn" onclick="runVerification()">
+                ✓ Verify Setup
+            </button>
+            <button class="btn-primary" id="runAllBtn" onclick="runTests('all')">
+                ▶ Run All Tests
+            </button>
+            <button class="btn-primary" id="regressionBtn" onclick="runRegressionTests()">
+                🔍 Regression Test
+            </button>
+            <div class="suite-buttons">
+                <button class="btn-secondary suite-btn" id="unitBtn" onclick="runTests('unit')">Unit Tests</button>
+                <button class="btn-secondary suite-btn" id="integrationBtn" onclick="runTests('integration')">Integration Tests</button>
+                <button class="btn-secondary suite-btn" id="e2eBtn" onclick="runTests('e2e')">E2E Tests</button>
+            </div>
+        </div>
+
+        <div class="status">
+            <h3>
+                <span class="status-indicator" id="statusIndicator"></span>
+                <span id="statusText">Ready</span>
+                <span class="loading" id="loadingSpinner" style="display: none;"></span>
+            </h3>
+            <div class="last-run" id="lastRun"></div>
+        </div>
+
+        <div class="stats" id="stats" style="display: none;">
+            <div class="stat-card">
+                <div class="stat-value" id="passedCount">0</div>
+                <div class="stat-label">Passed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="failedCount">0</div>
+                <div class="stat-label">Failed</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="totalCount">0</div>
+                <div class="stat-label">Total</div>
+            </div>
+        </div>
+
+        <div class="results" id="resultsContainer" style="display: none;">
+            <h2>Test Output</h2>
+            <div class="output" id="output"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentSuite = 'all';
+        let pollInterval = null;
+
+        function updateStatus(status, text) {
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const spinner = document.getElementById('loadingSpinner');
+            
+            indicator.className = 'status-indicator status-' + status;
+            statusText.textContent = text;
+            
+            if (status === 'running') {
+                spinner.style.display = 'inline-block';
+            } else {
+                spinner.style.display = 'none';
+            }
+        }
+
+        function setButtonsDisabled(disabled) {
+            document.getElementById('verifyBtn').disabled = disabled;
+            document.getElementById('runAllBtn').disabled = disabled;
+            document.querySelectorAll('.suite-btn').forEach(btn => {
+                btn.disabled = disabled;
+            });
+        }
+
+        function updateSuiteButtons(suite) {
+            document.querySelectorAll('.suite-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            if (suite === 'unit') document.getElementById('unitBtn').classList.add('active');
+            if (suite === 'integration') document.getElementById('integrationBtn').classList.add('active');
+            if (suite === 'e2e') document.getElementById('e2eBtn').classList.add('active');
+        }
+
+        async function runVerification() {
+            updateStatus('running', 'Running verification...');
+            setButtonsDisabled(true);
+            document.getElementById('resultsContainer').style.display = 'none';
+            document.getElementById('stats').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateStatus('completed', 'Verification completed');
+                    displayResults(data.results, true);
+                } else {
+                    updateStatus('error', 'Verification failed');
+                    displayResults(data.results, false);
+                }
+            } catch (error) {
+                updateStatus('error', 'Error: ' + error.message);
+                displayError(error.message);
+            } finally {
+                setButtonsDisabled(false);
+                startPolling();
+            }
+        }
+
+        async function runRegressionTests() {
+            updateStatus('running', 'Running regression tests...');
+            setButtonsDisabled(true);
+            document.getElementById('resultsContainer').style.display = 'none';
+            document.getElementById('stats').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/regression', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateStatus('completed', 'Regression tests completed');
+                    displayResults(data.results, data.results.success);
+                } else {
+                    updateStatus('error', 'Regression tests failed');
+                    displayError(data.error || 'Unknown error');
+                }
+            } catch (error) {
+                updateStatus('error', 'Error: ' + error.message);
+                displayError(error.message);
+            } finally {
+                setButtonsDisabled(false);
+                startPolling();
+            }
+        }
+
+        async function runTests(suite) {
+            currentSuite = suite;
+            updateSuiteButtons(suite);
+            updateStatus('running', `Running ${suite} tests...`);
+            setButtonsDisabled(true);
+            document.getElementById('resultsContainer').style.display = 'none';
+            document.getElementById('stats').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ suite })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    updateStatus('completed', `${suite} tests completed`);
+                    displayResults(data.results, data.results.success);
+                } else {
+                    updateStatus('error', `${suite} tests failed`);
+                    displayError(data.error || 'Unknown error');
+                }
+            } catch (error) {
+                updateStatus('error', 'Error: ' + error.message);
+                displayError(error.message);
+            } finally {
+                setButtonsDisabled(false);
+                startPolling();
+            }
+        }
+
+        function displayResults(results, success) {
+            const output = document.getElementById('output');
+            const container = document.getElementById('resultsContainer');
+            const stats = document.getElementById('stats');
+
+            output.className = 'output ' + (success ? 'success' : 'error');
+            output.textContent = results.stdout || results.stderr || 'No output';
+            
+            container.style.display = 'block';
+
+            // Parse stats from output if available
+            const passedMatch = results.stdout.match(/(\d+)\s+passed/i);
+            const failedMatch = results.stdout.match(/(\d+)\s+failed/i);
+            const totalMatch = results.stdout.match(/Total:\s+(\d+)/i);
+
+            if (passedMatch || failedMatch || totalMatch) {
+                document.getElementById('passedCount').textContent = passedMatch ? passedMatch[1] : '0';
+                document.getElementById('failedCount').textContent = failedMatch ? failedMatch[1] : '0';
+                document.getElementById('totalCount').textContent = totalMatch ? totalMatch[1] : '0';
+                stats.style.display = 'grid';
+            }
+        }
+
+        function displayError(message) {
+            const output = document.getElementById('output');
+            const container = document.getElementById('resultsContainer');
+            
+            output.className = 'output error';
+            output.textContent = 'Error: ' + message;
+            container.style.display = 'block';
+        }
+
+        function startPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+            }
+
+            pollInterval = setInterval(async () => {
+                try {
+                    const response = await fetch('/api/results');
+                    const data = await response.json();
+                    
+                    if (data.status === 'running') {
+                        updateStatus('running', 'Tests running...');
+                    } else if (data.status === 'completed') {
+                        updateStatus('completed', 'Tests completed');
+                        if (data.results) {
+                            displayResults(data.results, data.results.success);
+                        }
+                        clearInterval(pollInterval);
+                    } else if (data.status === 'error') {
+                        updateStatus('error', 'Tests failed');
+                        if (data.error) {
+                            displayError(data.error);
+                        }
+                        clearInterval(pollInterval);
+                    }
+
+                    if (data.lastRun) {
+                        document.getElementById('lastRun').textContent = 
+                            'Last run: ' + new Date(data.lastRun).toLocaleString();
+                    }
+                } catch (error) {
+                    console.error('Polling error:', error);
+                }
+            }, 1000);
+        }
+
+        // Initial load
+        fetch('/api/results')
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'running') {
+                    updateStatus('running', 'Tests running...');
+                    startPolling();
+                } else if (data.status === 'completed' && data.results) {
+                    updateStatus('completed', 'Tests completed');
+                    displayResults(data.results, data.results.success);
+                }
+                
+                if (data.lastRun) {
+                    document.getElementById('lastRun').textContent = 
+                        'Last run: ' + new Date(data.lastRun).toLocaleString();
+                }
+            });
+
+        updateSuiteButtons(currentSuite);
+    </script>
+</body>
+</html>
+

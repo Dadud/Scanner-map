@@ -1,0 +1,53 @@
+[
+  {
+    "id": 1,
+    "talkGroupID": "12345",
+    "transcription": "Unit 5 responding to 123 Main Street for a medical emergency. ETA 5 minutes.",
+    "timestamp": 1704067200,
+    "address": "123 Main Street, Baltimore, MD",
+    "lat": 39.2904,
+    "lon": -76.6122,
+    "category": "MEDICAL EMERGENCY"
+  },
+  {
+    "id": 2,
+    "talkGroupID": "12346",
+    "transcription": "Fire reported at 456 Oak Avenue. Structure fire, multiple units responding.",
+    "timestamp": 1704067260,
+    "address": "456 Oak Avenue, Baltimore, MD",
+    "lat": 39.2950,
+    "lon": -76.6150,
+    "category": "STRUCTURE FIRE"
+  },
+  {
+    "id": 3,
+    "talkGroupID": "12347",
+    "transcription": "Vehicle collision at the intersection of Main and Park. No injuries reported.",
+    "timestamp": 1704067320,
+    "address": "Main Street and Park Avenue, Baltimore, MD",
+    "lat": 39.2920,
+    "lon": -76.6130,
+    "category": "VEHICLE COLLISION"
+  },
+  {
+    "id": 4,
+    "talkGroupID": "12348",
+    "transcription": "Disturbance at 789 Elm Street. Units dispatched.",
+    "timestamp": 1704067380,
+    "address": "789 Elm Street, Baltimore, MD",
+    "lat": 39.2880,
+    "lon": -76.6100,
+    "category": "DISTURBANCE"
+  },
+  {
+    "id": 5,
+    "talkGroupID": "12345",
+    "transcription": "Copy that, we're on our way.",
+    "timestamp": 1704067440,
+    "address": null,
+    "lat": null,
+    "lon": null,
+    "category": "OTHER"
+  }
+]
+

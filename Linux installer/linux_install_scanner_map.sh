@@ -638,6 +638,69 @@ create_dirs() {
   print_message "Directories created."
 }
 
+create_shortcuts() {
+  print_message "Creating launcher shortcuts..."
+  cd "$INSTALL_DIR" || exit 1
+  
+  # Ensure the launcher script exists and is executable
+  LAUNCHER_SCRIPT="$INSTALL_DIR/start-scanner-map.sh"
+  if [ ! -f "$LAUNCHER_SCRIPT" ]; then
+    echo "Creating launcher script..."
+    cat > "$LAUNCHER_SCRIPT" << 'EOFLAUNCHER'
+#!/bin/bash
+# Scanner Map Launcher for Linux
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+if [ ! -d "node_modules" ]; then
+    echo "Installing dependencies..."
+    npm install --legacy-peer-deps
+fi
+npm start
+EOFLAUNCHER
+  fi
+  
+  chmod +x "$LAUNCHER_SCRIPT"
+  
+  # Ask user if they want desktop shortcut
+  if prompt_yes_no "Would you like to create a desktop launcher to start Scanner Map?"; then
+    # Create .desktop file
+    DESKTOP_DIR="$HOME/.local/share/applications"
+    mkdir -p "$DESKTOP_DIR"
+    DESKTOP_FILE="$DESKTOP_DIR/scanner-map.desktop"
+    
+    cat > "$DESKTOP_FILE" << EOFDESKTOP
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Scanner Map
+Comment=Real-time mapping system for radio calls with transcription and Discord integration
+Exec=$LAUNCHER_SCRIPT
+Icon=applications-internet
+Terminal=true
+Categories=Network;Utility;
+StartupNotify=true
+Path=$INSTALL_DIR
+EOFDESKTOP
+    
+    chmod +x "$DESKTOP_FILE"
+    echo "Desktop launcher created at: $DESKTOP_FILE"
+    
+    # Optionally copy to desktop if DESKTOP environment variable is set
+    if [ -n "$DESKTOP_SESSION" ] && [ -d "$HOME/Desktop" ]; then
+      if prompt_yes_no "Would you like to add a shortcut to your desktop folder?"; then
+        cp "$DESKTOP_FILE" "$HOME/Desktop/scanner-map.desktop"
+        chmod +x "$HOME/Desktop/scanner-map.desktop"
+        echo "Desktop shortcut created at: $HOME/Desktop/scanner-map.desktop"
+      fi
+    fi
+    
+    echo "You can now launch Scanner Map from your applications menu or desktop!"
+  else
+    echo "Skipping desktop launcher creation."
+    echo "You can launch Scanner Map using: cd $INSTALL_DIR && ./start-scanner-map.sh"
+  fi
+}
+
 import_talkgroups() {
     print_message "Import Talk Group Data (Required)"
     echo "This application requires talk group data exported from RadioReference.com."
@@ -732,7 +795,14 @@ manual_steps_reminder() {
   echo ""
   echo "--- HOW TO RUN (NEW INTEGRATED MODE) ---"
   echo "IMPORTANT: The bot now handles everything automatically!"
-  echo "1. Open Terminal: cd $INSTALL_DIR && source .venv/bin/activate && node bot.js"
+  echo ""
+  echo "OPTION 1 (Easiest): Launch from Applications menu or desktop shortcut"
+  echo ""
+  echo "OPTION 2 (Manual): Open Terminal:"
+  echo "   cd $INSTALL_DIR"
+  echo "   ./start-scanner-map.sh"
+  echo ""
+  echo "OPTION 3 (Advanced): cd $INSTALL_DIR && source .venv/bin/activate && node index.js"
   echo ""
   echo "The bot will now automatically:"
   echo "  ✅ Create database and tables"
@@ -771,6 +841,7 @@ create_env_file # Uses updated function
 install_node_deps # Uses updated function
 setup_python_venv # Will use T_DEVICE set earlier
 create_dirs
+create_shortcuts # Create desktop launcher
 import_talkgroups # Uses updated function
 manual_steps_reminder # Uses updated function
 

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Scanner Map
+Comment=Real-time mapping system for radio calls with transcription and Discord integration
+Exec=bash -c "cd '%k' && ./start-scanner-map.sh"
+Icon=applications-internet
+Terminal=true
+Categories=Network;Utility;
+StartupNotify=true
+Path=
+

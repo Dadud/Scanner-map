@@ -1,0 +1,17 @@
+# Test artifacts - ignore test databases and temporary files
+*.db
+test-*.db
+*-test.db
+test-storage/
+test-*/
+tmp/
+*.mp3
+*.m4a
+*.wav
+regression-baseline.json
+
+# Keep fixtures directory but ignore generated files
+fixtures/*.mp3
+fixtures/*.m4a
+fixtures/*.wav
+

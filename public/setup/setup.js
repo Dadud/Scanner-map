@@ -61,6 +61,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     completeScreen.classList.remove('active');
     completeScreen.style.display = 'none';
     
+    // Try to restore progress
+    const restored = restoreProgress();
+    if (restored && currentStep > 0) {
+      // Show resume message
+      showToast(`Resuming from step ${currentStep + 1} of ${steps.length}`, 'info');
+    }
+    
     if (status.hasExistingEnv) {
       // Show import notice if env exists
       const notice = document.getElementById('env-import-notice');
@@ -72,6 +79,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     wizardScreen.classList.add('active');
     completeScreen.classList.remove('active');
     completeScreen.style.display = 'none';
+    
+    // Try to restore progress even on error
+    restoreProgress();
   }
   
   // Setup event listeners (skip login form)
@@ -81,8 +91,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Build step indicators
   buildStepIndicators();
   
-  // Start with first step
-  renderStep(0);
+  // Start with restored step or first step
+  renderStep(currentStep);
 });
 
 // Build step indicators
@@ -134,6 +144,197 @@ async function api(endpoint, method = 'GET', body = null) {
   return response.json();
 }
 
+// Progress Persistence Functions (Phase 1)
+function saveProgress() {
+  try {
+    const progressData = {
+      currentStep: currentStep,
+      config: config,
+      timestamp: Date.now()
+    };
+    localStorage.setItem('scanner-map-setup-progress', JSON.stringify(progressData));
+    console.log('[Setup] Progress saved to localStorage');
+  } catch (error) {
+    console.warn('[Setup] Failed to save progress to localStorage:', error);
+  }
+}
+
+function restoreProgress() {
+  try {
+    const saved = localStorage.getItem('scanner-map-setup-progress');
+    if (saved) {
+      const progressData = JSON.parse(saved);
+      // Only restore if progress is less than 7 days old
+      const age = Date.now() - progressData.timestamp;
+      if (age < 7 * 24 * 60 * 60 * 1000) {
+        currentStep = progressData.currentStep || 0;
+        config = progressData.config || {};
+        console.log('[Setup] Progress restored from localStorage, resuming from step', currentStep);
+        return true;
+      } else {
+        // Clear stale progress
+        localStorage.removeItem('scanner-map-setup-progress');
+      }
+    }
+  } catch (error) {
+    console.warn('[Setup] Failed to restore progress from localStorage:', error);
+  }
+  return false;
+}
+
+function clearProgress() {
+  try {
+    localStorage.removeItem('scanner-map-setup-progress');
+    console.log('[Setup] Progress cleared from localStorage');
+  } catch (error) {
+    console.warn('[Setup] Failed to clear progress from localStorage:', error);
+  }
+}
+
+// Inline Validation Functions (Phase 4)
+function validateField(fieldId, fieldType, value) {
+  const field = document.getElementById(fieldId);
+  if (!field) return { valid: true, message: '' };
+  
+  // Remove existing error styling
+  field.classList.remove('field-error');
+  const existingError = field.parentElement.querySelector('.field-error-message');
+  if (existingError) existingError.remove();
+  
+  let valid = true;
+  let message = '';
+  
+  switch (fieldType) {
+    case 'latitude':
+      const lat = parseFloat(value);
+      if (isNaN(lat) || lat < -90 || lat > 90) {
+        valid = false;
+        message = 'Latitude must be between -90 and 90';
+      }
+      break;
+      
+    case 'longitude':
+      const lng = parseFloat(value);
+      if (isNaN(lng) || lng < -180 || lng > 180) {
+        valid = false;
+        message = 'Longitude must be between -180 and 180';
+      }
+      break;
+      
+    case 'url':
+      if (value && value.trim()) {
+        try {
+          new URL(value);
+        } catch (e) {
+          valid = false;
+          message = 'Please enter a valid URL (e.g., http://localhost:8000)';
+        }
+      }
+      break;
+      
+    case 'api-key':
+      if (value && value.trim().length < 10) {
+        valid = false;
+        message = 'API key appears to be too short';
+      }
+      break;
+      
+    case 'password':
+      if (value && value.length > 0 && value.length < 8) {
+        valid = false;
+        message = 'Password must be at least 8 characters';
+      }
+      break;
+  }
+  
+  if (!valid) {
+    field.classList.add('field-error');
+    const errorDiv = document.createElement('div');
+    errorDiv.className = 'field-error-message';
+    errorDiv.style.color = 'var(--error, #ff4444)';
+    errorDiv.style.fontSize = '0.85em';
+    errorDiv.style.marginTop = '4px';
+    errorDiv.textContent = message;
+    field.parentElement.appendChild(errorDiv);
+  }
+  
+  return { valid, message };
+}
+
+function validateStep(stepId) {
+  let isValid = true;
+  
+  switch (stepId) {
+    case 'map': {
+      const latValid = validateField('map-lat', 'latitude', document.getElementById('map-lat')?.value);
+      const lngValid = validateField('map-lng', 'longitude', document.getElementById('map-lng')?.value);
+      isValid = latValid.valid && lngValid.valid;
+      break;
+    }
+    case 'admin': {
+      const authEnabled = document.getElementById('auth-enabled')?.checked;
+      if (authEnabled) {
+        const password = document.getElementById('admin-password')?.value;
+        const passwordValid = validateField('admin-password', 'password', password);
+        isValid = passwordValid.valid;
+      }
+      break;
+    }
+    case 'transcription': {
+      const mode = document.querySelector('input[name="transcription-mode"]:checked')?.value;
+      if (mode === 'remote') {
+        const urlValid = validateField('remote-url', 'url', document.getElementById('remote-url')?.value);
+        isValid = urlValid.valid;
+      } else if (mode === 'openai') {
+        const keyValid = validateField('openai-transcription-key', 'api-key', document.getElementById('openai-transcription-key')?.value);
+        isValid = keyValid.valid;
+      }
+      break;
+    }
+    case 'geocoding': {
+      const provider = document.querySelector('input[name="geocoding-provider"]:checked')?.value;
+      if (provider === 'locationiq') {
+        const keyValid = validateField('locationiq-key', 'api-key', document.getElementById('locationiq-key')?.value);
+        isValid = keyValid.valid;
+      } else if (provider === 'google') {
+        const keyValid = validateField('google-maps-key', 'api-key', document.getElementById('google-maps-key')?.value);
+        isValid = keyValid.valid;
+      }
+      break;
+    }
+    case 'ai': {
+      const provider = document.querySelector('input[name="ai-provider"]:checked')?.value;
+      if (provider === 'openai') {
+        const keyValid = validateField('openai-ai-key', 'api-key', document.getElementById('openai-ai-key')?.value);
+        isValid = keyValid.valid;
+      } else if (provider === 'ollama') {
+        const urlValid = validateField('ollama-url', 'url', document.getElementById('ollama-url')?.value);
+        isValid = urlValid.valid;
+      }
+      break;
+    }
+    case 'discord': {
+      const enabled = document.getElementById('discord-enabled')?.checked;
+      if (enabled) {
+        const tokenValid = validateField('discord-token', 'api-key', document.getElementById('discord-token')?.value);
+        isValid = tokenValid.valid;
+      }
+      break;
+    }
+  }
+  
+  // Update Next button state
+  if (btnNext) {
+    btnNext.disabled = !isValid;
+  }
+  
+  return isValid;
+}
+
+// Expose validation functions globally for inline handlers
+window.validateField = validateField;
+window.validateStep = validateStep;
+
 // Go to step
 function goToStep(step) {
   if (step < 0 || step >= steps.length) return;
@@ -146,6 +347,9 @@ async function handleNext() {
   // Validate and save current step
   const valid = await validateAndSaveStep();
   if (!valid) return;
+  
+  // Save progress after successful step validation
+  saveProgress();
   
   if (currentStep === steps.length - 1) {
     // Complete setup
@@ -410,9 +614,11 @@ async function renderStep(step) {
       break;
     case 'admin':
       renderAdminStep();
+      setTimeout(() => validateStep('admin'), 100); // Validate after DOM is ready
       break;
     case 'map':
       renderMapStep();
+      setTimeout(() => validateStep('map'), 100); // Validate after DOM is ready
       break;
     case 'apikey':
       await renderApiKeyStep();
@@ -422,15 +628,19 @@ async function renderStep(step) {
       break;
     case 'transcription':
       await renderTranscriptionStep();
+      setTimeout(() => validateStep('transcription'), 100); // Validate after DOM is ready
       break;
     case 'geocoding':
       await renderGeocodingStep();
+      setTimeout(() => validateStep('geocoding'), 100); // Validate after DOM is ready
       break;
     case 'ai':
       renderAiStep();
+      setTimeout(() => validateStep('ai'), 100); // Validate after DOM is ready
       break;
     case 'discord':
       renderDiscordStep();
+      setTimeout(() => validateStep('discord'), 100); // Validate after DOM is ready
       break;
     case 'review':
       renderReviewStep();
@@ -523,6 +733,10 @@ async function detectLocation() {
     
     if (data.success) {
       detectedLocation = data;
+      
+      // Apply smart defaults immediately (Phase 2)
+      applySmartDefaults(data);
+      
       if (status) status.textContent = '';
       if (spinner) spinner.style.display = 'none';
       if (result) {
@@ -538,6 +752,41 @@ async function detectLocation() {
     if (status) status.textContent = 'Location detection unavailable - you can set it manually';
     if (spinner) spinner.style.display = 'none';
   }
+}
+
+// Apply smart defaults based on detected location (Phase 2)
+function applySmartDefaults(locationData) {
+  if (!locationData || !locationData.success) return;
+  
+  // Apply map center coordinates
+  if (!config.map) config.map = {};
+  if (locationData.lat && locationData.lng) {
+    config.map.center = [locationData.lat, locationData.lng];
+  }
+  
+  // Apply timezone
+  if (!config.server) config.server = {};
+  if (locationData.timezone) {
+    config.server.timezone = locationData.timezone;
+  }
+  
+  // Apply geocoding state
+  if (!config.geocoding) config.geocoding = {};
+  if (locationData.stateCode) {
+    config.geocoding.state = locationData.stateCode;
+  } else if (locationData.region) {
+    // Try to extract state code from region name if needed
+    config.geocoding.state = locationData.region;
+  }
+  if (locationData.country) {
+    config.geocoding.country = locationData.country;
+  }
+  
+  console.log('[Setup] Smart defaults applied from detected location:', {
+    center: config.map.center,
+    timezone: config.server.timezone,
+    state: config.geocoding.state
+  });
 }
 
 window.detectLocationAgain = detectLocation;
@@ -594,7 +843,7 @@ function renderAdminStep() {
       <div class="two-columns">
         <div class="form-group">
           <label for="admin-password">Password</label>
-          <input type="password" id="admin-password" placeholder="Enter a secure password">
+          <input type="password" id="admin-password" placeholder="Enter a secure password" onblur="validateField('admin-password', 'password', this.value); validateStep('admin');">
           <div class="help-text">Minimum 8 characters</div>
         </div>
         <div class="form-group">
@@ -648,11 +897,11 @@ function renderMapStep() {
     <div class="two-columns" style="margin-top: 16px;">
       <div class="form-group">
         <label for="map-lat">Latitude</label>
-        <input type="number" id="map-lat" step="0.000001" value="${defaultLat}" placeholder="39.0">
+        <input type="number" id="map-lat" step="0.000001" value="${defaultLat}" placeholder="39.0" onblur="validateField('map-lat', 'latitude', this.value); validateStep('map');">
       </div>
       <div class="form-group">
         <label for="map-lng">Longitude</label>
-        <input type="number" id="map-lng" step="0.000001" value="${defaultLng}" placeholder="-76.9">
+        <input type="number" id="map-lng" step="0.000001" value="${defaultLng}" placeholder="-76.9" onblur="validateField('map-lng', 'longitude', this.value); validateStep('map');">
       </div>
     </div>
     
@@ -704,6 +953,9 @@ function renderMapStep() {
       
       // Reverse geocode to find nearest city
       await updateCityFromCoordinates(e.latlng.lat, e.latlng.lng);
+      
+      // Auto-detect counties if on geocoding step
+      await autoDetectCountiesFromMapLocation(e.latlng.lat, e.latlng.lng);
     });
     
     // Handle marker drag
@@ -720,6 +972,9 @@ function renderMapStep() {
       
       // Reverse geocode to find nearest city
       await updateCityFromCoordinates(pos.lat, pos.lng);
+      
+      // Auto-detect counties if on geocoding step
+      await autoDetectCountiesFromMapLocation(pos.lat, pos.lng);
     });
     
     // Handle coordinate input
@@ -731,6 +986,7 @@ function renderMapStep() {
         mapCenterLocation = { lat, lng };
         showMapRadiusInfo(lat, lng);
         await updateCityFromCoordinates(lat, lng);
+        await autoDetectCountiesFromMapLocation(lat, lng);
       }
     });
     document.getElementById('map-lng').addEventListener('change', async () => {
@@ -741,6 +997,7 @@ function renderMapStep() {
         mapCenterLocation = { lat, lng };
         showMapRadiusInfo(lat, lng);
         await updateCityFromCoordinates(lat, lng);
+        await autoDetectCountiesFromMapLocation(lat, lng);
       }
     });
     
@@ -1783,7 +2040,7 @@ function renderTranscriptionOptions(mode, hasGpu, recommendation) {
       container.innerHTML = `
         <div class="form-group">
           <label for="remote-url">Server URL</label>
-          <input type="url" id="remote-url" placeholder="http://localhost:8000" value="http://localhost:8000">
+          <input type="url" id="remote-url" placeholder="http://localhost:8000" value="http://localhost:8000" onblur="validateField('remote-url', 'url', this.value); validateStep('transcription');">
           <div class="help-text">URL of your Faster Whisper server</div>
         </div>
         <div class="connection-test">
@@ -1800,7 +2057,7 @@ function renderTranscriptionOptions(mode, hasGpu, recommendation) {
             OpenAI API Key
             <button type="button" class="btn-help" onclick="toggleApiHelp('openai-transcription')" style="margin-left: 8px; font-size: 0.85em; padding: 2px 8px;">How to get API key?</button>
           </label>
-          <input type="password" id="openai-transcription-key" placeholder="sk-..." oninput="validateApiKey('openai', this.value)">
+          <input type="password" id="openai-transcription-key" placeholder="sk-..." oninput="validateApiKey('openai', this.value)" onblur="validateField('openai-transcription-key', 'api-key', this.value); validateStep('transcription');">
           <div id="openai-transcription-key-status" style="margin-top: 4px;"></div>
         </div>
         <div id="openai-transcription-help" style="display: none; margin-bottom: 16px; padding: 16px; background: var(--surface-light); border-radius: 8px; border-left: 3px solid var(--secondary);">
@@ -2002,14 +2259,17 @@ async function renderGeocodingStep() {
       <div class="form-group">
         <label for="geo-counties">Target Counties</label>
         <div style="position: relative;">
-          <input type="text" id="geo-counties-search" placeholder="Search counties..." style="margin-bottom: 8px;" oninput="filterCounties()">
-          <div id="geo-counties-container" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 8px; background: var(--surface);">
-            <div style="color: var(--text-secondary); padding: 8px;">Select a state to load counties</div>
+          <input type="text" id="geo-counties-search" class="county-search-input" placeholder="Search counties..." oninput="filterCounties()">
+          <div id="geo-counties-container" class="county-list-container">
+            <div class="county-list-empty">Select a state to load counties</div>
           </div>
-          <div class="help-text" style="margin-top: 8px;">
-            <span id="counties-count">0</span> counties selected
-            <button type="button" class="btn btn-secondary btn-small" onclick="selectAllCounties()" style="margin-left: 8px;">Select All</button>
+          <div class="help-text" style="margin-top: 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <span><strong id="counties-count">0</strong> counties selected</span>
+            <button type="button" class="btn btn-secondary btn-small" onclick="selectAllCounties()">Select All</button>
             <button type="button" class="btn btn-secondary btn-small" onclick="clearCounties()">Clear</button>
+            ${mapCenterLocation ? `<button type="button" class="btn btn-primary btn-small" onclick="autoDetectCountiesFromMap()" id="auto-detect-counties-btn">
+              <span id="auto-detect-counties-text">📍 Auto-detect from map</span>
+            </button>` : ''}
           </div>
         </div>
       </div>
@@ -2059,119 +2319,17 @@ async function renderGeocodingStep() {
     }, 100);
   }
   
-  // Auto-select counties asynchronously (non-blocking, happens after UI renders)
+  // Auto-select counties asynchronously after state is loaded (non-blocking)
   if (mapCenterLocation && detectedLocation?.stateCode) {
-    // Show loading indicator
-    setTimeout(() => {
-      const countiesContainer = document.getElementById('geo-counties-container');
-      if (countiesContainer) {
-        countiesContainer.innerHTML = `
-          <div style="padding: 16px; text-align: center; color: var(--text-secondary);">
-            <div>⏳ Finding counties within 20 miles...</div>
-            <div style="font-size: 0.85em; margin-top: 8px;">This may take 1-2 minutes</div>
-          </div>
-        `;
+    // Wait for counties to load, then auto-detect
+    setTimeout(async () => {
+      const stateSelect = document.getElementById('geo-state');
+      if (stateSelect && stateSelect.value === detectedLocation.stateCode && countiesData[detectedLocation.stateCode]?.length > 0) {
+        await autoDetectCountiesFromMapLocation(mapCenterLocation.lat, mapCenterLocation.lng);
       }
-    }, 200);
-    
-    // Start async county detection (don't await - let it run in background)
-    (async () => {
-      try {
-        const result = await api('/api/setup/counties-within-radius', 'POST', {
-          lat: mapCenterLocation.lat,
-          lng: mapCenterLocation.lng,
-          stateCode: detectedLocation.stateCode
-        });
-        
-        if (result.counties && result.counties.length > 0) {
-          // Update the UI with selected counties
-          const stateSelect = document.getElementById('geo-state');
-          if (stateSelect && stateSelect.value === detectedLocation.stateCode) {
-            result.counties.forEach(county => selectedCounties.add(county));
-            const counties = countiesData[detectedLocation.stateCode] || [];
-            renderCountiesList(counties);
-            
-            // Show success message
-            showToast(`Auto-selected ${result.counties.length} counties within 20 miles`, 'success');
-            
-            // Update the info box
-            const infoBox = document.querySelector('[data-county-info]');
-            if (infoBox) {
-              infoBox.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span>✓</span>
-                  <div>
-                    <div style="font-weight: 600;">Auto-selected ${result.counties.length} counties within 20-mile radius</div>
-                    <div style="font-size: 0.85em; color: var(--text-secondary); margin-top: 4px;">
-                      Based on map center: ${mapCenterLocation.lat.toFixed(4)}, ${mapCenterLocation.lng.toFixed(4)}
-                    </div>
-                  </div>
-                </div>
-              `;
-            }
-          }
-        } else {
-          // No counties found - restore normal UI
-          const stateSelect = document.getElementById('geo-state');
-          if (stateSelect && stateSelect.value) {
-            loadCountiesForState(stateSelect.value);
-          }
-          showToast('No counties found within 20 miles. Please select manually.', 'warning');
-        }
-      } catch (error) {
-        console.error('Error auto-selecting counties:', error);
-        // On error, restore normal UI
-        const stateSelect = document.getElementById('geo-state');
-        if (stateSelect && stateSelect.value) {
-          loadCountiesForState(stateSelect.value);
-        }
-        showToast('Error finding counties. Please select manually.', 'error');
-      }
-    })();
+    }, 500);
   }
   
-  // Add button to auto-select counties based on map location
-  if (mapCenterLocation && !autoSelectedCounties.length) {
-    setTimeout(() => {
-      const countiesContainer = document.getElementById('geo-counties-container');
-      if (countiesContainer && countiesContainer.parentElement) {
-        const helpText = countiesContainer.parentElement.querySelector('.help-text');
-        if (helpText) {
-          const autoSelectBtn = document.createElement('button');
-          autoSelectBtn.type = 'button';
-          autoSelectBtn.className = 'btn btn-secondary btn-small';
-          autoSelectBtn.textContent = 'Auto-select within 20 miles';
-          autoSelectBtn.onclick = async () => {
-            const stateSelect = document.getElementById('geo-state');
-            if (!stateSelect || !stateSelect.value) {
-              showToast('Please select a state first', 'error');
-              return;
-            }
-            
-            try {
-              const result = await api('/api/setup/counties-within-radius', 'POST', {
-                lat: mapCenterLocation.lat,
-                lng: mapCenterLocation.lng,
-                stateCode: stateSelect.value
-              });
-              
-              if (result.counties && result.counties.length > 0) {
-                result.counties.forEach(county => selectedCounties.add(county));
-                const counties = countiesData[stateSelect.value] || [];
-                renderCountiesList(counties);
-                showToast(`Selected ${result.counties.length} counties within 20 miles`, 'success');
-              } else {
-                showToast('No counties found within 20 miles', 'warning');
-              }
-            } catch (error) {
-              showToast('Error selecting counties', 'error');
-            }
-          };
-          helpText.appendChild(autoSelectBtn);
-        }
-      }
-    }, 300);
-  }
   
   // Handle state change
   document.getElementById('geo-state').addEventListener('change', (e) => {
@@ -2272,13 +2430,17 @@ let countiesData = {};
 let selectedCounties = new Set();
 
 async function loadCountiesForState(stateCode) {
+  const container = document.getElementById('geo-counties-container');
+  if (!container) return;
+  
   if (!stateCode) {
-    document.getElementById('geo-counties-container').innerHTML = 
-      '<div style="color: var(--text-secondary); padding: 8px;">Select a state to load counties</div>';
+    container.innerHTML = '<div class="county-list-empty">Select a state to load counties</div>';
     return;
   }
   
   try {
+    container.innerHTML = '<div class="county-list-loading">Loading counties</div>';
+    
     const response = await fetch(`/api/setup/counties/${stateCode}`);
     const data = await response.json();
     
@@ -2297,29 +2459,126 @@ async function loadCountiesForState(stateCode) {
           renderCountiesList(data.counties);
         }
       }
+      
+      // Auto-detect counties from map location if available
+      if (mapCenterLocation && currentStep === steps.findIndex(s => s.id === 'geocoding')) {
+        await autoDetectCountiesFromMapLocation(mapCenterLocation.lat, mapCenterLocation.lng);
+      }
     } else {
-      document.getElementById('geo-counties-container').innerHTML = 
-        '<div style="color: var(--text-secondary); padding: 8px;">No counties found for this state</div>';
+      container.innerHTML = '<div class="county-list-empty">No counties found for this state</div>';
     }
   } catch (error) {
-    document.getElementById('geo-counties-container').innerHTML = 
-      '<div style="color: var(--error); padding: 8px;">Error loading counties</div>';
+    console.error('Error loading counties:', error);
+    container.innerHTML = '<div class="county-list-empty" style="color: var(--error);">Error loading counties</div>';
   }
 }
 
+// Auto-detect counties from map location
+async function autoDetectCountiesFromMapLocation(lat, lng) {
+  // Only run if we're on the geocoding step
+  if (currentStep !== steps.findIndex(s => s.id === 'geocoding')) {
+    return;
+  }
+  
+  const stateSelect = document.getElementById('geo-state');
+  if (!stateSelect || !stateSelect.value) {
+    return; // State not selected yet
+  }
+  
+  const container = document.getElementById('geo-counties-container');
+  if (!container) {
+    return; // Container doesn't exist
+  }
+  
+  // Ensure counties are loaded
+  if (!countiesData[stateSelect.value] || countiesData[stateSelect.value].length === 0) {
+    // Counties not loaded yet, trigger load first
+    await loadCountiesForState(stateSelect.value);
+    // Wait a bit for counties to render
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+  
+  // Check again after loading
+  if (!countiesData[stateSelect.value] || countiesData[stateSelect.value].length === 0) {
+    return; // Still no counties loaded
+  }
+  
+  const btn = document.getElementById('auto-detect-counties-btn');
+  const btnText = document.getElementById('auto-detect-counties-text');
+  
+  try {
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.textContent = '⏳ Detecting...';
+    
+    // Show loading state
+    const currentContent = container.innerHTML;
+    container.innerHTML = '<div class="county-list-loading">Finding counties within 20 miles</div>';
+    
+    const result = await api('/api/setup/counties-within-radius', 'POST', {
+      lat: lat,
+      lng: lng,
+      stateCode: stateSelect.value
+    });
+    
+    if (result.counties && result.counties.length > 0) {
+      // Clear existing selections and set new ones
+      selectedCounties.clear();
+      result.counties.forEach(county => selectedCounties.add(county));
+      
+      // Re-render with selected counties
+      renderCountiesList(countiesData[stateSelect.value]);
+      
+      showToast(`Auto-selected ${result.counties.length} counties within 20 miles`, 'success');
+    } else {
+      // Restore previous state
+      renderCountiesList(countiesData[stateSelect.value]);
+      showToast('No counties found within 20 miles', 'warning');
+    }
+  } catch (error) {
+    console.error('Error auto-detecting counties:', error);
+    // Restore previous state
+    if (countiesData[stateSelect.value]) {
+      renderCountiesList(countiesData[stateSelect.value]);
+    }
+    showToast('Error detecting counties', 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnText) btnText.textContent = '📍 Auto-detect from map';
+  }
+}
+
+window.autoDetectCountiesFromMap = function() {
+  if (mapCenterLocation) {
+    autoDetectCountiesFromMapLocation(mapCenterLocation.lat, mapCenterLocation.lng);
+  } else {
+    showToast('Please set a location on the map first', 'error');
+  }
+};
+
 function renderCountiesList(counties) {
   const container = document.getElementById('geo-counties-container');
+  if (!container) return;
+  
   const searchTerm = document.getElementById('geo-counties-search')?.value.toLowerCase() || '';
   
   const filtered = counties.filter(c => c.toLowerCase().includes(searchTerm));
   
-  container.innerHTML = filtered.map(county => `
-    <label style="display: flex; align-items: center; padding: 4px; cursor: pointer;">
-      <input type="checkbox" value="${county}" ${selectedCounties.has(county) ? 'checked' : ''} 
-             onchange="toggleCounty('${county}')" style="margin-right: 8px;">
-      <span>${county}</span>
-    </label>
-  `).join('');
+  if (filtered.length === 0) {
+    container.innerHTML = `<div class="county-list-empty">No counties found${searchTerm ? ' matching "' + searchTerm + '"' : ''}</div>`;
+    updateCountiesCount();
+    return;
+  }
+  
+  container.innerHTML = filtered.map(county => {
+    const isSelected = selectedCounties.has(county);
+    return `
+      <div class="county-item ${isSelected ? 'selected' : ''}" onclick="toggleCounty('${county.replace(/'/g, "\\'")}')">
+        <input type="checkbox" value="${county.replace(/'/g, "\\'")}" ${isSelected ? 'checked' : ''} 
+               onchange="toggleCounty('${county.replace(/'/g, "\\'")}')" onclick="event.stopPropagation();">
+        <span class="county-name">${county}</span>
+      </div>
+    `;
+  }).join('');
   
   updateCountiesCount();
 }
@@ -2395,7 +2654,7 @@ function renderGeocodingOptions(provider) {
           LocationIQ API Key
           <button type="button" class="btn-help" onclick="toggleApiHelp('locationiq')" style="margin-left: 8px; font-size: 0.85em; padding: 2px 8px;">How to get API key?</button>
         </label>
-        <input type="password" id="locationiq-key" placeholder="pk.xxx" oninput="validateApiKey('locationiq', this.value)">
+        <input type="password" id="locationiq-key" placeholder="pk.xxx" oninput="validateApiKey('locationiq', this.value)" onblur="validateField('locationiq-key', 'api-key', this.value); validateStep('geocoding');">
         <div id="locationiq-key-status" style="margin-top: 4px;"></div>
       </div>
       <div id="locationiq-help" style="display: none; margin-bottom: 16px; padding: 16px; background: var(--surface-light); border-radius: 8px; border-left: 3px solid var(--secondary);">
@@ -2423,7 +2682,7 @@ function renderGeocodingOptions(provider) {
           Google Maps API Key
           <button type="button" class="btn-help" onclick="toggleApiHelp('google')" style="margin-left: 8px; font-size: 0.85em; padding: 2px 8px;">How to get API key?</button>
         </label>
-        <input type="password" id="google-maps-key" placeholder="AIza..." oninput="validateApiKey('google', this.value)">
+        <input type="password" id="google-maps-key" placeholder="AIza..." oninput="validateApiKey('google', this.value)" onblur="validateField('google-maps-key', 'api-key', this.value); validateStep('geocoding');">
         <div id="google-key-status" style="margin-top: 4px;"></div>
       </div>
       <div id="google-help" style="display: none; margin-bottom: 16px; padding: 16px; background: var(--surface-light); border-radius: 8px; border-left: 3px solid var(--secondary);">
@@ -2631,7 +2890,7 @@ function renderAiProviderOptions(provider) {
       <div class="two-columns">
         <div class="form-group">
           <label for="openai-ai-key">OpenAI API Key</label>
-          <input type="password" id="openai-ai-key" placeholder="sk-...">
+          <input type="password" id="openai-ai-key" placeholder="sk-..." onblur="validateField('openai-ai-key', 'api-key', this.value); validateStep('ai');">
         </div>
         <div class="form-group">
           <label for="openai-model">Model</label>
@@ -2671,7 +2930,7 @@ function renderDiscordStep() {
           Bot Token
           <button type="button" class="btn-help" onclick="toggleApiHelp('discord')" style="margin-left: 8px; font-size: 0.85em; padding: 2px 8px;">How to create bot?</button>
         </label>
-        <input type="password" id="discord-token" placeholder="Your Discord bot token" oninput="validateApiKey('discord', this.value)">
+        <input type="password" id="discord-token" placeholder="Your Discord bot token" oninput="validateApiKey('discord', this.value)" onblur="validateField('discord-token', 'api-key', this.value); validateStep('discord');">
         <div id="discord-key-status" style="margin-top: 4px;"></div>
         <div id="discord-help" style="display: none; margin-top: 16px; padding: 16px; background: var(--surface-light); border-radius: 8px; border-left: 3px solid var(--secondary);">
           <h4 style="margin-bottom: 8px;">Creating a Discord Bot:</h4>
@@ -2782,11 +3041,140 @@ async function renderReviewStep() {
     </div>
     ` : ''}
     
+    <div style="margin-top: 24px; padding: 16px; background: var(--surface-light); border-radius: 8px;">
+      <h3 style="margin-bottom: 12px;">Connection Testing</h3>
+      <p style="font-size: 0.9em; color: var(--text-secondary); margin-bottom: 12px;">
+        Test all configured service connections before completing setup:
+      </p>
+      <button class="btn btn-secondary" onclick="testAllConnections()" id="test-all-btn">
+        <span id="test-all-spinner" style="display: none;" class="spinner"></span>
+        Test All Connections
+      </button>
+      <div id="connection-test-results" style="margin-top: 16px;"></div>
+    </div>
+    
     <p style="color: var(--text-muted); margin-top: 16px;">
       Click "Complete Setup" to save your configuration and start Scanner Map.
     </p>
   `;
 }
+
+// Test all configured connections (Phase 5)
+window.testAllConnections = async function() {
+  const btn = document.getElementById('test-all-btn');
+  const spinner = document.getElementById('test-all-spinner');
+  const resultsDiv = document.getElementById('connection-test-results');
+  
+  if (!btn || !resultsDiv) return;
+  
+  btn.disabled = true;
+  spinner.style.display = 'inline-block';
+  resultsDiv.innerHTML = '<p>Testing connections...</p>';
+  
+  const results = [];
+  
+  // Test transcription connection
+  if (config.transcription?.mode === 'openai' && config.transcription?.openaiKey) {
+    try {
+      const result = await api('/api/setup/test-connection', 'POST', {
+        type: 'openai',
+        config: { apiKey: config.transcription.openaiKey }
+      });
+      results.push({ name: 'OpenAI Transcription', success: result.success, message: result.message });
+    } catch (e) {
+      results.push({ name: 'OpenAI Transcription', success: false, message: e.message });
+    }
+  }
+  
+  // Test geocoding connection
+  if (config.geocoding?.provider === 'locationiq' && config.geocoding?.locationiqKey) {
+    try {
+      const result = await api('/api/setup/test-connection', 'POST', {
+        type: 'locationiq',
+        config: { apiKey: config.geocoding.locationiqKey }
+      });
+      results.push({ name: 'LocationIQ Geocoding', success: result.success, message: result.message });
+    } catch (e) {
+      results.push({ name: 'LocationIQ Geocoding', success: false, message: e.message });
+    }
+  } else if (config.geocoding?.provider === 'google' && config.geocoding?.googleMapsKey) {
+    try {
+      const result = await api('/api/setup/test-connection', 'POST', {
+        type: 'google',
+        config: { apiKey: config.geocoding.googleMapsKey }
+      });
+      results.push({ name: 'Google Maps Geocoding', success: result.success, message: result.message });
+    } catch (e) {
+      results.push({ name: 'Google Maps Geocoding', success: false, message: e.message });
+    }
+  }
+  
+  // Test AI connection
+  if (config.ai?.enabled) {
+    if (config.ai?.provider === 'ollama' && config.ai?.ollamaUrl) {
+      try {
+        const result = await api('/api/setup/test-connection', 'POST', {
+          type: 'ollama',
+          config: { url: config.ai.ollamaUrl }
+        });
+        results.push({ name: 'Ollama AI', success: result.success, message: result.message });
+      } catch (e) {
+        results.push({ name: 'Ollama AI', success: false, message: e.message });
+      }
+    } else if (config.ai?.provider === 'openai' && config.ai?.openaiKey) {
+      try {
+        const result = await api('/api/setup/test-connection', 'POST', {
+          type: 'openai',
+          config: { apiKey: config.ai.openaiKey }
+        });
+        results.push({ name: 'OpenAI AI', success: result.success, message: result.message });
+      } catch (e) {
+        results.push({ name: 'OpenAI AI', success: false, message: e.message });
+      }
+    }
+  }
+  
+  // Test Discord connection
+  if (config.discord?.enabled && config.discord?.token) {
+    try {
+      const result = await api('/api/setup/test-connection', 'POST', {
+        type: 'discord',
+        config: { token: config.discord.token }
+      });
+      results.push({ name: 'Discord Bot', success: result.success, message: result.message });
+    } catch (e) {
+      results.push({ name: 'Discord Bot', success: false, message: e.message });
+    }
+  }
+  
+  // Display results
+  if (results.length === 0) {
+    resultsDiv.innerHTML = '<p style="color: var(--text-muted);">No connections to test (all services use free/default options).</p>';
+  } else {
+    const successCount = results.filter(r => r.success).length;
+    resultsDiv.innerHTML = `
+      <div style="margin-bottom: 12px; font-weight: 600;">
+        Results: ${successCount}/${results.length} connections successful
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        ${results.map(r => `
+          <div style="padding: 12px; background: var(--surface); border-radius: 6px; border-left: 3px solid ${r.success ? 'var(--success)' : 'var(--error)'};">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+              <span>${r.success ? '✓' : '✗'}</span>
+              <strong>${r.name}</strong>
+            </div>
+            <div style="font-size: 0.9em; color: var(--text-secondary); margin-left: 24px;">
+              ${r.message}
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+  
+  btn.disabled = false;
+  spinner.style.display = 'none';
+};
 
 window.copyToClipboard = function(text) {
   navigator.clipboard.writeText(text).then(() => {
@@ -2841,6 +3229,9 @@ async function completeSetup() {
     const result = await api('/api/setup/complete', 'POST');
     
     if (result.success) {
+      // Clear progress since setup is complete
+      clearProgress();
+      
       wizardScreen.classList.remove('active');
       wizardScreen.style.display = 'none';
       completeScreen.classList.add('active');

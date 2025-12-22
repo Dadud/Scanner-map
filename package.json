@@ -4,10 +4,21 @@
   "description": "Real-time mapping system for radio calls with transcription and Discord integration",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node start-with-deps.js",
+    "launch": "node start-with-deps.js",
     "setup": "node index.js",
     "bot": "node bot.js",
-    "webserver": "node webserver.js"
+    "webserver": "node webserver.js",
+    "test": "node tests/run-all-tests.js",
+    "test:unit": "node tests/run-all-tests.js --suite=unit",
+    "test:integration": "node tests/run-all-tests.js --suite=integration",
+    "test:e2e": "node tests/run-all-tests.js --suite=e2e",
+    "test:verbose": "node tests/run-all-tests.js --verbose",
+    "test:coverage": "node tests/run-all-tests.js --coverage",
+    "test:verify": "node tests/verify-setup.js",
+    "test:server": "node tests/start-test-server.js",
+    "test:regression": "node tests/regression-test.js",
+    "test:regression:update": "node tests/regression-test.js --update-baseline"
   },
   "keywords": [
     "scanner",
@@ -45,6 +56,9 @@
     "uuid": "^9.0.1",
     "winston": "^3.11.0",
     "archiver": "^7.0.1"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
   },
   "engines": {
     "node": ">=18.0.0"

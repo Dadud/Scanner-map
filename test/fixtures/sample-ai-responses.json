@@ -1,0 +1,44 @@
+{
+  "address_extraction": {
+    "valid": "123 Main Street, Baltimore, MD",
+    "no_address": "No address found",
+    "intersection": "Main Street and Park Avenue, Baltimore, MD",
+    "block": "100 block of Main Street, Baltimore, MD"
+  },
+  "categories": [
+    "MEDICAL EMERGENCY",
+    "STRUCTURE FIRE",
+    "VEHICLE COLLISION",
+    "DISTURBANCE",
+    "BURGLARY",
+    "ASSAULT",
+    "MISSING PERSON",
+    "OTHER"
+  ],
+  "summary": {
+    "example": {
+      "summary": "Active period with multiple emergency responses including medical calls, structure fires, and vehicle collisions across the city.",
+      "highlights": [
+        {
+          "id": 1,
+          "talk_group": "Fire Department",
+          "importance": "High",
+          "description": "Structure fire at 456 Oak Avenue requiring multiple units",
+          "timestamp": 1704067260
+        },
+        {
+          "id": 2,
+          "talk_group": "Police",
+          "importance": "Medium",
+          "description": "Vehicle collision at Main and Park with no injuries",
+          "timestamp": 1704067320
+        }
+      ]
+    }
+  },
+  "ask_ai": {
+    "example_question": "What emergencies happened in the last hour?",
+    "example_response": "In the last hour, there were 5 emergency calls including 2 medical emergencies, 1 structure fire, 1 vehicle collision, and 1 disturbance. The most significant was a structure fire at 456 Oak Avenue."
+  }
+}
+

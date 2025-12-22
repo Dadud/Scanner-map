@@ -240,9 +240,37 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
     const selectedCounties = [];
     const countyCoordinates = new Map(); // Cache county coordinates
     
+    // Get geocoding API keys and provider preference from config
+    const config = configManager.init().getAll();
+    const geocodingConfig = config.geocoding || {};
+    const locationiqKey = geocodingConfig.locationiqKey;
+    const googleMapsKey = geocodingConfig.googleMapsKey;
+    const provider = geocodingConfig.provider || 'nominatim';
+    
+    // Determine which provider to use (priority: LocationIQ > Google Maps > Nominatim)
+    let useLocationIQ = false;
+    let useGoogleMaps = false;
+    let geocodingProvider = 'Nominatim';
+    
+    if (provider === 'locationiq' && locationiqKey) {
+      useLocationIQ = true;
+      geocodingProvider = 'LocationIQ';
+    } else if (provider === 'google' && googleMapsKey) {
+      useGoogleMaps = true;
+      geocodingProvider = 'Google Maps';
+    } else if (locationiqKey) {
+      // Auto-detect: if LocationIQ key exists, prefer it
+      useLocationIQ = true;
+      geocodingProvider = 'LocationIQ';
+    } else if (googleMapsKey) {
+      // Auto-detect: if Google Maps key exists, use it
+      useGoogleMaps = true;
+      geocodingProvider = 'Google Maps';
+    }
+    
     // First, use reverse geocoding to find the county at the user's location
     const { reverseGeocode } = require('./setup-detection');
-    const reverseResult = await reverseGeocode(lat, lng);
+    const reverseResult = await reverseGeocode(lat, lng, locationiqKey);
     let centerCounty = null;
     
     if (reverseResult.success && reverseResult.city) {
@@ -257,12 +285,13 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
       }
     }
     
-    // Use Nominatim to geocode each county and calculate distances
+    // Geocode each county and calculate distances
+    // Priority: LocationIQ > Google Maps > Nominatim
     // Limit to reasonable number to avoid rate limits
     const maxCountiesToCheck = Math.min(counties.length, 50);
     const countiesToCheck = counties.slice(0, maxCountiesToCheck);
     
-    console.log(`[Setup] Checking ${countiesToCheck.length} counties for location (${lat}, ${lng})`);
+    console.log(`[Setup] Checking ${countiesToCheck.length} counties for location (${lat}, ${lng}) using ${geocodingProvider}`);
     
     for (const county of countiesToCheck) {
       try {
@@ -274,33 +303,88 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
           // Geocode county to get its coordinates
           const query = `${county} County, ${stateCode}, USA`;
           const fetch = require('node-fetch');
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          let response;
           
-          const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&addressdetails=1`, {
-            signal: controller.signal,
-            headers: {
-              'User-Agent': 'Scanner-Map-Setup/1.0'
-            }
-          });
-          
-          clearTimeout(timeoutId);
+          if (useLocationIQ) {
+            // Use LocationIQ API (better rate limits)
+            const params = new URLSearchParams({
+              key: locationiqKey,
+              q: query,
+              format: 'json',
+              addressdetails: '1',
+              limit: '1'
+            });
+            
+            response = await fetch(`https://us1.locationiq.com/v1/search?${params.toString()}`, {
+              timeout: 10000 // 10 second timeout for LocationIQ
+            });
+          } else if (useGoogleMaps) {
+            // Use Google Maps Geocoding API
+            const params = new URLSearchParams({
+              address: query,
+              key: googleMapsKey
+            });
+            
+            response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`, {
+              timeout: 10000 // 10 second timeout for Google Maps
+            });
+          } else {
+            // Use Nominatim (free but strict rate limits: 1 req/sec)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // Increased timeout to 10s
+            
+            response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&addressdetails=1`, {
+              signal: controller.signal,
+              headers: {
+                'User-Agent': 'Scanner-Map-Setup/1.0'
+              }
+            });
+            
+            clearTimeout(timeoutId);
+          }
           
           if (response.ok) {
             const data = await response.json();
-            if (data && data.length > 0) {
-              countyLat = parseFloat(data[0].lat);
-              countyLng = parseFloat(data[0].lon);
-              countyCoordinates.set(county, [countyLat, countyLng]);
+            
+            // Parse response based on provider
+            if (useGoogleMaps) {
+              // Google Maps returns { status: 'OK', results: [...] }
+              if (data.status === 'OK' && data.results && data.results.length > 0) {
+                const location = data.results[0].geometry.location;
+                countyLat = parseFloat(location.lat);
+                countyLng = parseFloat(location.lng);
+                countyCoordinates.set(county, [countyLat, countyLng]);
+              } else {
+                console.warn(`[Setup] Google Maps returned status: ${data.status} for ${county}`);
+                continue; // Skip if no results
+              }
             } else {
-              continue; // Skip if no results
+              // LocationIQ and Nominatim return array directly
+              if (data && data.length > 0) {
+                countyLat = parseFloat(data[0].lat);
+                countyLng = parseFloat(data[0].lon);
+                countyCoordinates.set(county, [countyLat, countyLng]);
+              } else {
+                continue; // Skip if no results
+              }
             }
           } else {
+            const errorText = await response.text().catch(() => '');
+            console.warn(`[Setup] Geocoding API error for ${county}: ${response.status} ${response.statusText} - ${errorText}`);
             continue; // Skip on error
           }
           
-          // Rate limit: 1 request per second for Nominatim
-          await new Promise(resolve => setTimeout(resolve, 1100));
+          // Rate limiting based on provider
+          if (useLocationIQ) {
+            // LocationIQ allows 2-5 requests per second depending on plan, use 500ms delay for safety
+            await new Promise(resolve => setTimeout(resolve, 500));
+          } else if (useGoogleMaps) {
+            // Google Maps allows up to 50 requests per second, use 200ms delay for safety
+            await new Promise(resolve => setTimeout(resolve, 200));
+          } else {
+            // Nominatim: 1 request per second (strict)
+            await new Promise(resolve => setTimeout(resolve, 1100));
+          }
         }
         
         // Calculate distance from user location to county
@@ -312,7 +396,11 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
         }
       } catch (error) {
         // Skip county on error, continue with next
-        console.warn(`[Setup] Error geocoding county ${county}:`, error.message);
+        if (error.name === 'AbortError') {
+          console.warn(`[Setup] Timeout geocoding county ${county}`);
+        } else {
+          console.warn(`[Setup] Error geocoding county ${county}:`, error.message);
+        }
       }
     }
     
