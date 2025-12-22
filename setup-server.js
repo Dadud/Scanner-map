@@ -206,7 +206,7 @@ app.get('/api/setup/counties/:state', (req, res) => {
 // Find counties within 20 miles of a location
 app.post('/api/setup/counties-within-radius', async (req, res) => {
   try {
-    const { lat, lng, stateCode } = req.body;
+    const { lat, lng, stateCode, geocodingProvider, locationiqKey: reqLocationiqKey, googleMapsKey: reqGoogleMapsKey } = req.body;
     
     if (!lat || !lng || !stateCode) {
       return res.status(400).json({ error: 'lat, lng, and stateCode are required' });
@@ -240,32 +240,34 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
     const selectedCounties = [];
     const countyCoordinates = new Map(); // Cache county coordinates
     
-    // Get geocoding API keys and provider preference from config
+    // Get geocoding API keys and provider preference from request (during setup) or config (after setup)
     const config = configManager.init().getAll();
     const geocodingConfig = config.geocoding || {};
-    const locationiqKey = geocodingConfig.locationiqKey;
-    const googleMapsKey = geocodingConfig.googleMapsKey;
-    const provider = geocodingConfig.provider || 'nominatim';
+    
+    // Use values from request if provided (during setup), otherwise fall back to config
+    const locationiqKey = reqLocationiqKey || geocodingConfig.locationiqKey;
+    const googleMapsKey = reqGoogleMapsKey || geocodingConfig.googleMapsKey;
+    const provider = geocodingProvider || geocodingConfig.provider || 'nominatim';
     
     // Determine which provider to use (priority: LocationIQ > Google Maps > Nominatim)
     let useLocationIQ = false;
     let useGoogleMaps = false;
-    let geocodingProvider = 'Nominatim';
+    let providerName = 'Nominatim';
     
     if (provider === 'locationiq' && locationiqKey) {
       useLocationIQ = true;
-      geocodingProvider = 'LocationIQ';
+      providerName = 'LocationIQ';
     } else if (provider === 'google' && googleMapsKey) {
       useGoogleMaps = true;
-      geocodingProvider = 'Google Maps';
+      providerName = 'Google Maps';
     } else if (locationiqKey) {
       // Auto-detect: if LocationIQ key exists, prefer it
       useLocationIQ = true;
-      geocodingProvider = 'LocationIQ';
+      providerName = 'LocationIQ';
     } else if (googleMapsKey) {
       // Auto-detect: if Google Maps key exists, use it
       useGoogleMaps = true;
-      geocodingProvider = 'Google Maps';
+      providerName = 'Google Maps';
     }
     
     // First, use reverse geocoding to find the county at the user's location
@@ -291,7 +293,7 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
     const maxCountiesToCheck = Math.min(counties.length, 50);
     const countiesToCheck = counties.slice(0, maxCountiesToCheck);
     
-    console.log(`[Setup] Checking ${countiesToCheck.length} counties for location (${lat}, ${lng}) using ${geocodingProvider}`);
+    console.log(`[Setup] Checking ${countiesToCheck.length} counties for location (${lat}, ${lng}) using ${providerName} (provider: ${provider})`);
     
     for (const county of countiesToCheck) {
       try {
@@ -903,7 +905,7 @@ app.post('/api/setup/reverse-geocode', async (req, res) => {
       return res.status(400).json({ error: 'lat and lng are required' });
     }
     
-    // Try to get LocationIQ key from config if available
+    // Use API key from request if provided (during setup), otherwise try config
     const config = configManager.init().getAll();
     const locationiqKey = apiKey || config.geocoding?.locationiqKey;
     

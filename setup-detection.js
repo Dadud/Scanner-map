@@ -282,10 +282,12 @@ async function reverseGeocode(lat, lng, apiKey = null) {
       if (response.ok) {
         const data = await response.json();
         if (data.address) {
+          const stateName = data.address.state || data.address.region || '';
           return {
             success: true,
             city: data.address.city || data.address.town || data.address.village || data.address.municipality || data.address.county || '',
-            state: data.address.state || data.address.region || '',
+            state: stateName,
+            stateCode: data.address.state_code || extractStateCode(stateName),
             country: data.address.country_code?.toUpperCase() || 'US',
             fullAddress: data.display_name || ''
           };
@@ -301,10 +303,12 @@ async function reverseGeocode(lat, lng, apiKey = null) {
         if (response.ok) {
           const data = await response.json();
           if (data.address) {
+            const stateName = data.address.state || data.address.region || '';
             return {
               success: true,
               city: data.address.city || data.address.town || data.address.village || data.address.municipality || '',
-              state: data.address.state || data.address.region || '',
+              state: stateName,
+              stateCode: data.address.state_code || extractStateCode(stateName),
               country: data.address.country_code?.toUpperCase() || 'US',
               fullAddress: data.display_name || ''
             };

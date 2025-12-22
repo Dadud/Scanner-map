@@ -1928,6 +1928,421 @@ app.put('/api/admin/settings/:section', adminAuth, async (req, res) => {
   }
 });
 
+// Get diagnostic information (public endpoint - for bug reporting)
+app.get('/api/diagnostics', async (req, res) => {
+  try {
+    const os = require('os');
+    const fs = require('fs');
+    const path = require('path');
+    const { execSync } = require('child_process');
+    const { detectSystemInfo, detectGPU } = require('./setup-detection');
+    const { anonymizeValue } = require('./diagnostics-helper');
+    
+    // Gather comprehensive system information
+    const systemInfo = detectSystemInfo();
+    const gpuInfo = await detectGPU();
+    const packageJson = require('./package.json');
+    
+    // Get detailed system information
+    const hostname = os.hostname();
+    const uptime = Math.floor(os.uptime());
+    const uptimeDays = Math.floor(uptime / 86400);
+    const uptimeHours = Math.floor((uptime % 86400) / 3600);
+    const uptimeMinutes = Math.floor((uptime % 3600) / 60);
+    const loadAvg = os.loadavg();
+    const networkInterfaces = os.networkInterfaces();
+    
+    // Get Node.js and npm versions
+    const nodeVersion = process.version;
+    let npmVersion = 'unknown';
+    try {
+      npmVersion = execSync('npm --version', { encoding: 'utf8', timeout: 5000 }).trim();
+    } catch (e) {
+      // npm not available or error
+    }
+    
+    // Get package dependencies info
+    const dependencies = Object.keys(packageJson.dependencies || {});
+    const devDependencies = Object.keys(packageJson.devDependencies || {});
+    
+    // Check installation type
+    const isInstalledViaNpm = fs.existsSync(path.join(process.cwd(), 'node_modules'));
+    const hasPackageLock = fs.existsSync(path.join(process.cwd(), 'package-lock.json'));
+    const hasYarnLock = fs.existsSync(path.join(process.cwd(), 'yarn.lock'));
+    const hasStartScript = fs.existsSync(path.join(process.cwd(), 'Start Scanner Map.bat')) || 
+                           fs.existsSync(path.join(process.cwd(), 'start-scanner-map.sh'));
+    
+    // Get config status (anonymized)
+    let configStatus = { available: false, setupComplete: false, details: {} };
+    if (configManager) {
+      try {
+        const config = configManager.getAll();
+        configStatus = {
+          available: true,
+          setupComplete: config.setupComplete || false,
+          hasAdmin: !!config.admin?.passwordHash,
+          adminUsername: config.admin?.username || 'not set',
+          authEnabled: config.admin?.authEnabled || false,
+          geocodingProvider: config.geocoding?.provider || 'not configured',
+          geocodingEnabled: config.geocoding?.enabled || false,
+          hasLocationiqKey: !!config.geocoding?.locationiqKey,
+          hasGoogleMapsKey: !!config.geocoding?.googleMapsKey,
+          transcriptionMode: config.transcription?.mode || 'not configured',
+          transcriptionEnabled: config.transcription?.enabled || false,
+          transcriptionDevice: config.transcription?.device || 'not set',
+          whisperModel: config.transcription?.whisperModel || 'not set',
+          aiProvider: config.ai?.provider || 'not configured',
+          aiEnabled: config.ai?.enabled || false,
+          aiModel: config.ai?.openaiModel || config.ai?.ollamaModel || 'not set',
+          discordEnabled: config.discord?.enabled || false,
+          hasDiscordToken: !!config.discord?.token,
+          serverPort: config.server?.port || 'not set',
+          serverTimezone: config.server?.timezone || 'not set',
+          mapCenter: config.map?.center || 'not set',
+          mapZoom: config.map?.zoom || 'not set',
+          storageMode: config.storage?.mode || 'not set'
+        };
+      } catch (err) {
+        configStatus.error = err.message;
+      }
+    }
+    
+    // Check for important files and directories
+    const importantPaths = [
+      './index.js',
+      './bot.js',
+      './webserver.js',
+      './config-manager.js',
+      './data/config.json',
+      './data/.secret',
+      './.env',
+      './botdata.db',
+      './node_modules',
+      './public',
+      './logs',
+      './uploads'
+    ];
+    
+    const fileStatus = {};
+    for (const filePath of importantPaths) {
+      const fullPath = path.resolve(process.cwd(), filePath);
+      if (fs.existsSync(fullPath)) {
+        const stats = fs.statSync(fullPath);
+        fileStatus[filePath] = {
+          exists: true,
+          isDirectory: stats.isDirectory(),
+          size: stats.isDirectory() ? null : stats.size,
+          modified: stats.mtime.toISOString()
+        };
+      } else {
+        fileStatus[filePath] = { exists: false };
+      }
+    }
+    
+    // Check for log files (more comprehensive search)
+    const logFiles = [];
+    const possibleLogDirs = [
+      process.cwd(),
+      logsDir,
+      path.join(process.cwd(), 'logs'),
+      path.join(process.cwd(), 'data', 'logs')
+    ];
+    const possibleLogFiles = ['combined.log', 'error.log', 'bot.log', 'webserver.log', 'app.log'];
+    
+    for (const logDir of possibleLogDirs) {
+      if (fs.existsSync(logDir)) {
+        for (const logFile of possibleLogFiles) {
+          const logPath = path.join(logDir, logFile);
+          if (fs.existsSync(logPath)) {
+            const stats = fs.statSync(logPath);
+            if (!logFiles.find(f => f.name === logFile && f.path === logPath)) {
+              logFiles.push({
+                name: logFile,
+                path: path.relative(process.cwd(), logPath),
+                size: stats.size,
+                modified: stats.mtime.toISOString()
+              });
+            }
+          }
+        }
+      }
+    }
+    
+    // Get last few lines of error log (anonymized)
+    let recentErrors = [];
+    const errorLogEntry = logFiles.find(f => f.name === 'error.log');
+    if (errorLogEntry) {
+      const errorLogPath = path.resolve(process.cwd(), errorLogEntry.path);
+      if (fs.existsSync(errorLogPath)) {
+        try {
+          const logContent = fs.readFileSync(errorLogPath, 'utf8');
+        const lines = logContent.split('\n').filter(l => l.trim());
+        // Get last 10 error lines, anonymize
+        recentErrors = lines.slice(-10).map(line => {
+          let anonymized = line;
+          // Anonymize API keys
+          anonymized = anonymized.replace(/(sk-[a-zA-Z0-9]{8})[a-zA-Z0-9]+/g, '$1***');
+          anonymized = anonymized.replace(/(pk\.[a-zA-Z0-9]{8})[a-zA-Z0-9]+/g, '$1***');
+          anonymized = anonymized.replace(/(AIza[a-zA-Z0-9]{8})[a-zA-Z0-9]+/g, '$1***');
+          // Anonymize tokens
+          anonymized = anonymized.replace(/(token|password|key|secret)[\s:=]+([a-zA-Z0-9]{20,})/gi, '$1=***HIDDEN***');
+          return anonymized;
+        });
+        } catch (err) {
+          recentErrors = [`Error reading log file: ${err.message}`];
+        }
+      }
+    }
+    
+    // Check database
+    const dbPath = './botdata.db';
+    let dbStatus = { exists: false };
+    let dbStats = null;
+    if (fs.existsSync(dbPath)) {
+      try {
+        const stats = fs.statSync(dbPath);
+        dbStatus = {
+          exists: true,
+          size: stats.size,
+          modified: stats.mtime.toISOString()
+        };
+        
+        // Try to get basic DB stats (non-blocking)
+        try {
+          const sqlite3 = require('sqlite3').verbose();
+          const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY);
+          db.all("SELECT name FROM sqlite_master WHERE type='table'", (err, tables) => {
+            if (!err && tables) {
+              dbStats = { tables: tables.map(t => t.name) };
+            }
+          });
+          db.close();
+        } catch (dbErr) {
+          // Ignore DB read errors in diagnostics
+        }
+      } catch (err) {
+        dbStatus.error = err.message;
+      }
+    }
+    
+    // Get network information (anonymized IPs)
+    const networkInfo = [];
+    for (const [name, interfaces] of Object.entries(networkInterfaces)) {
+      for (const iface of interfaces || []) {
+        if (iface.family === 'IPv4' && !iface.internal) {
+          networkInfo.push({
+            interface: name,
+            address: iface.address,
+            netmask: iface.netmask,
+            mac: anonymizeValue(iface.mac, 'token')
+          });
+        }
+      }
+    }
+    
+    // Get environment variables (anonymized)
+    const envVars = {};
+    const sensitiveEnvVars = ['KEY', 'TOKEN', 'PASSWORD', 'SECRET', 'API', 'AUTH'];
+    for (const [key, value] of Object.entries(process.env)) {
+      const isSensitive = sensitiveEnvVars.some(s => key.toUpperCase().includes(s));
+      envVars[key] = isSensitive ? anonymizeValue(value, 'api-key') : value;
+    }
+    
+    // Get port configuration
+    const port = configStatus.serverPort || process.env.WEBSERVER_PORT || process.env.PORT || 8080;
+    
+    // Get process information
+    const processInfo = {
+      pid: process.pid,
+      ppid: process.ppid,
+      memoryUsage: process.memoryUsage(),
+      uptime: process.uptime()
+    };
+    
+    // Format as comprehensive plain text report
+    const diagnostics = `═══════════════════════════════════════════════════════════════
+SCANNER MAP COMPREHENSIVE DIAGNOSTIC REPORT
+Generated: ${new Date().toISOString()}
+═══════════════════════════════════════════════════════════════
+
+┌─ SYSTEM INFORMATION ────────────────────────────────────────┐
+Hostname: ${hostname}
+Operating System: ${systemInfo.platform} ${systemInfo.arch}
+OS Type: ${os.type()}
+OS Release: ${os.release()}
+OS Uptime: ${uptimeDays} days, ${uptimeHours} hours, ${uptimeMinutes} minutes
+Load Average (1min, 5min, 15min): ${loadAvg.map(l => l.toFixed(2)).join(', ')}
+Home Directory: ${os.homedir()}
+Temp Directory: ${os.tmpdir()}
+
+┌─ CPU INFORMATION ───────────────────────────────────────────┐
+Model: ${systemInfo.cpu.model}
+Cores: ${systemInfo.cpu.cores} physical cores
+Speed: ${(systemInfo.cpu.speed / 1000).toFixed(2)} GHz
+Endianness: ${os.endianness()}
+
+┌─ MEMORY INFORMATION ────────────────────────────────────────┐
+Total RAM: ${systemInfo.memory.totalGB} GB (${(systemInfo.memory.totalGB * 1024).toFixed(0)} MB)
+Free RAM: ${systemInfo.memory.freeGB} GB (${(systemInfo.memory.freeGB * 1024).toFixed(0)} MB)
+Used RAM: ${systemInfo.memory.availableGB} GB
+Process Memory:
+  - RSS: ${(processInfo.memoryUsage.rss / 1024 / 1024).toFixed(2)} MB
+  - Heap Used: ${(processInfo.memoryUsage.heapUsed / 1024 / 1024).toFixed(2)} MB
+  - Heap Total: ${(processInfo.memoryUsage.heapTotal / 1024 / 1024).toFixed(2)} MB
+  - External: ${(processInfo.memoryUsage.external / 1024 / 1024).toFixed(2)} MB
+
+┌─ GPU INFORMATION ───────────────────────────────────────────┐
+${gpuInfo.available ? 
+  `GPU: ${gpuInfo.name}
+VRAM: ${gpuInfo.vramGB} GB
+GPU Count: ${gpuInfo.count}` : 
+  'GPU: Not detected (no NVIDIA GPU found or nvidia-smi not available)'}
+
+┌─ NETWORK INFORMATION ───────────────────────────────────────┐
+${networkInfo.length > 0 ? 
+  networkInfo.map(n => `Interface: ${n.interface}
+  IP Address: ${n.address}
+  Netmask: ${n.netmask}
+  MAC: ${n.mac}`).join('\n') : 
+  'No external network interfaces found'}
+
+┌─ RUNTIME INFORMATION ───────────────────────────────────────┐
+Node.js Version: ${nodeVersion}
+Node.js Path: ${process.execPath}
+npm Version: ${npmVersion}
+Process ID: ${processInfo.pid}
+Parent Process ID: ${processInfo.ppid}
+Process Uptime: ${Math.floor(processInfo.uptime / 3600)} hours, ${Math.floor((processInfo.uptime % 3600) / 60)} minutes
+Working Directory: ${process.cwd()}
+
+┌─ APPLICATION INFORMATION ───────────────────────────────────┐
+Version: ${packageJson.version}
+Name: ${packageJson.name}
+Description: ${packageJson.description || 'N/A'}
+License: ${packageJson.license || 'N/A'}
+Node Engine Requirement: ${packageJson.engines?.node || 'not specified'}
+
+┌─ INSTALLATION TYPE ─────────────────────────────────────────┐
+Installation Method: ${isInstalledViaNpm ? 'npm/node_modules detected' : 'unknown'}
+Package Lock: ${hasPackageLock ? 'package-lock.json found (npm)' : 'not found'}
+Yarn Lock: ${hasYarnLock ? 'yarn.lock found (yarn)' : 'not found'}
+Launcher Scripts: ${hasStartScript ? 'Found (.bat/.sh)' : 'Not found'}
+Installation Directory: ${process.cwd()}
+
+┌─ DEPENDENCIES ──────────────────────────────────────────────┐
+Production Dependencies: ${dependencies.length}
+  ${dependencies.slice(0, 20).join(', ')}${dependencies.length > 20 ? `\n  ... and ${dependencies.length - 20} more` : ''}
+Dev Dependencies: ${devDependencies.length}
+  ${devDependencies.join(', ')}
+
+┌─ CONFIGURATION STATUS ──────────────────────────────────────┐
+Config Manager: ${configStatus.available ? 'Available' : 'Not available'}
+Setup Complete: ${configStatus.setupComplete ? 'Yes ✓' : 'No ✗'}
+${configStatus.error ? `Config Error: ${configStatus.error}` : ''}
+
+Server Configuration:
+  Port: ${configStatus.serverPort}
+  Timezone: ${configStatus.serverTimezone}
+  Public Domain: ${configStatus.serverPort ? 'configured' : 'not configured'}
+
+Admin Configuration:
+  Admin Username: ${configStatus.adminUsername}
+  Admin Account: ${configStatus.hasAdmin ? 'Configured ✓' : 'Not configured ✗'}
+  Auth Enabled: ${configStatus.authEnabled ? 'Yes ✓' : 'No ✗'}
+
+Geocoding Configuration:
+  Provider: ${configStatus.geocodingProvider}
+  Enabled: ${configStatus.geocodingEnabled ? 'Yes ✓' : 'No ✗'}
+  LocationIQ Key: ${configStatus.hasLocationiqKey ? 'Configured ✓' : 'Not configured ✗'}
+  Google Maps Key: ${configStatus.hasGoogleMapsKey ? 'Configured ✓' : 'Not configured ✗'}
+
+Transcription Configuration:
+  Mode: ${configStatus.transcriptionMode}
+  Enabled: ${configStatus.transcriptionEnabled ? 'Yes ✓' : 'No ✗'}
+  Device: ${configStatus.transcriptionDevice}
+  Model: ${configStatus.whisperModel}
+
+AI Configuration:
+  Provider: ${configStatus.aiProvider}
+  Enabled: ${configStatus.aiEnabled ? 'Yes ✓' : 'No ✗'}
+  Model: ${configStatus.aiModel}
+
+Discord Configuration:
+  Enabled: ${configStatus.discordEnabled ? 'Yes ✓' : 'No ✗'}
+  Token: ${configStatus.hasDiscordToken ? 'Configured ✓' : 'Not configured ✗'}
+
+Map Configuration:
+  Center: ${Array.isArray(configStatus.mapCenter) ? `[${configStatus.mapCenter.join(', ')}]` : configStatus.mapCenter}
+  Zoom: ${configStatus.mapZoom}
+
+Storage Configuration:
+  Mode: ${configStatus.storageMode}
+
+┌─ FILE SYSTEM STATUS ────────────────────────────────────────┐
+${Object.entries(fileStatus).map(([filePath, status]) => 
+  `${status.exists ? '✓' : '✗'} ${filePath}${status.exists ? 
+    ` (${status.isDirectory ? 'directory' : `${(status.size / 1024).toFixed(2)} KB`}, modified: ${status.modified.split('T')[0]})` : 
+    ' (not found)'}`
+).join('\n')}
+
+┌─ DATABASE STATUS ───────────────────────────────────────────┐
+Database File: ${dbStatus.exists ? 
+  `✓ Exists
+  Size: ${(dbStatus.size / 1024 / 1024).toFixed(2)} MB
+  Modified: ${dbStatus.modified}
+  ${dbStats?.tables ? `Tables: ${dbStats.tables.join(', ')}` : ''}` : 
+  '✗ Not found'}
+
+┌─ LOG FILES ─────────────────────────────────────────────────┐
+${logFiles.length > 0 ? 
+  logFiles.map(f => `✓ ${f.name}
+  Path: ${f.path}
+  Size: ${(f.size / 1024).toFixed(2)} KB
+  Modified: ${f.modified}`).join('\n\n') : 
+  '✗ No log files found'}
+
+┌─ PORT STATUS ───────────────────────────────────────────────┐
+Webserver Port: ${port}
+
+┌─ RECENT ERRORS (Last 10 lines from error.log, anonymized) ──┐
+${recentErrors.length > 0 ? 
+  recentErrors.join('\n') : 
+  'No recent errors found in logs (or error.log not accessible)'}
+
+┌─ ENVIRONMENT VARIABLES (Anonymized) ────────────────────────┐
+${Object.entries(envVars)
+  .filter(([key]) => key.startsWith('WEBSERVER_') || key.startsWith('GEOCODING_') || 
+                     key.startsWith('TRANSCRIPTION_') || key.startsWith('AI_') || 
+                     key.startsWith('DISCORD_') || key === 'NODE_ENV' || key === 'PORT')
+  .map(([key, value]) => `${key}=${value}`)
+  .join('\n') || 'No relevant environment variables set'}
+
+┌─ PROCESS INFORMATION ───────────────────────────────────────┐
+Process ID: ${processInfo.pid}
+Parent PID: ${processInfo.ppid}
+CPU Usage: ${process.cpuUsage ? 'Available' : 'Not available'}
+Memory Usage: See Memory Information section above
+
+┌─ NOTES ─────────────────────────────────────────────────────┐
+- All sensitive information (API keys, tokens, passwords) has been anonymized
+- File paths are relative to the working directory where available
+- This report is safe to share for bug reporting and troubleshooting
+- For detailed error logs, check the log files listed above
+- Include this full report when reporting bugs or requesting help
+
+═══════════════════════════════════════════════════════════════
+End of Diagnostic Report
+═══════════════════════════════════════════════════════════════
+`;
+    
+    res.setHeader('Content-Type', 'text/plain');
+    res.send(diagnostics);
+  } catch (error) {
+    console.error('[Diagnostics] Error generating diagnostic report:', error);
+    res.status(500).send(`Error generating diagnostic report: ${error.message}\n\nStack trace:\n${error.stack}`);
+  }
+});
+
 // Test connection endpoint (admin only)
 app.post('/api/admin/test-connection', adminAuth, async (req, res) => {
   const { type, config } = req.body;

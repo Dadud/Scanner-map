@@ -3593,6 +3593,15 @@ function setupUserManagement() {
         });
     }
     
+    const diagnosticsBtn = document.getElementById('diagnostics-btn');
+    if (diagnosticsBtn) {
+        diagnosticsBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            copyDiagnostics();
+            dropdownContent.classList.remove('show');
+        });
+    }
+    
     // Setup modal forms
     setupAddUserForm();
     setupModalCancelButtons();
@@ -3612,6 +3621,108 @@ function showViewUsersModal() {
         loadUsersList();
         modal.style.display = 'block';
     }
+}
+
+async function copyDiagnostics() {
+    try {
+        // Gather client-side browser information
+        const browserInfo = {
+            userAgent: navigator.userAgent,
+            platform: navigator.platform,
+            language: navigator.language,
+            languages: navigator.languages ? navigator.languages.join(', ') : 'unknown',
+            cookieEnabled: navigator.cookieEnabled,
+            onLine: navigator.onLine,
+            screenResolution: `${screen.width}x${screen.height}`,
+            windowSize: `${window.innerWidth}x${window.innerHeight}`,
+            colorDepth: screen.colorDepth,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Get server-side diagnostics
+        const response = await fetch('/api/diagnostics');
+        if (!response.ok) {
+            throw new Error('Failed to fetch diagnostics');
+        }
+        
+        let diagnostics = await response.text();
+        
+        // Append browser information to diagnostics
+        const browserSection = `
+┌─ BROWSER INFORMATION (Client-Side) ───────────────────────┐
+User Agent: ${browserInfo.userAgent}
+Platform: ${browserInfo.platform}
+Language: ${browserInfo.language}
+Languages: ${browserInfo.languages}
+Cookies Enabled: ${browserInfo.cookieEnabled ? 'Yes' : 'No'}
+Online Status: ${browserInfo.onLine ? 'Online' : 'Offline'}
+Screen Resolution: ${browserInfo.screenResolution}
+Window Size: ${browserInfo.windowSize}
+Color Depth: ${browserInfo.colorDepth} bits
+Timezone: ${browserInfo.timezone}
+Report Timestamp: ${browserInfo.timestamp}
+
+═══════════════════════════════════════════════════════════════
+`;
+        
+        // Insert browser info before the final notes section
+        diagnostics = diagnostics.replace('┌─ NOTES ─────────────────────────────────────────────────────┐', browserSection + '┌─ NOTES ─────────────────────────────────────────────────────┐');
+        
+        // Copy to clipboard
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(diagnostics);
+            showNotification('Diagnostics copied to clipboard! Paste it into your bug report.', 'success');
+        } else {
+            // Fallback: show in a modal with copy button
+            showDiagnosticsModal(diagnostics);
+        }
+    } catch (error) {
+        console.error('Error fetching diagnostics:', error);
+        showNotification('Error fetching diagnostics: ' + error.message, 'error');
+    }
+}
+
+function showDiagnosticsModal(diagnostics) {
+    // Create modal if it doesn't exist
+    let modal = document.getElementById('diagnostics-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'diagnostics-modal';
+        modal.className = 'modal';
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 800px; max-height: 90vh;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                    <h2>Diagnostic Information</h2>
+                    <button onclick="document.getElementById('diagnostics-modal').style.display='none'" style="background: none; border: none; font-size: 24px; cursor: pointer; color: var(--text);">&times;</button>
+                </div>
+                <p style="margin-bottom: 16px; color: var(--text-secondary);">
+                    Copy the text below and paste it into your bug report.
+                </p>
+                <textarea id="diagnostics-text" readonly style="width: 100%; height: 400px; padding: 12px; font-family: monospace; font-size: 12px; background: var(--surface); border: 1px solid var(--border); color: var(--text); resize: vertical;">${diagnostics.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
+                <div style="margin-top: 16px; display: flex; gap: 12px;">
+                    <button onclick="copyDiagnosticsText()" class="cyberpunk-button" style="flex: 1;">Copy to Clipboard</button>
+                    <button onclick="document.getElementById('diagnostics-modal').style.display='none'" class="cyberpunk-button" style="flex: 1;">Close</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        
+        // Add copy function
+        window.copyDiagnosticsText = function() {
+            const textarea = document.getElementById('diagnostics-text');
+            textarea.select();
+            document.execCommand('copy');
+            showNotification('Diagnostics copied to clipboard!', 'success');
+        };
+    }
+    
+    // Update content and show
+    const textarea = document.getElementById('diagnostics-text');
+    if (textarea) {
+        textarea.value = diagnostics;
+    }
+    modal.style.display = 'block';
 }
 
 function setupAddUserForm() {

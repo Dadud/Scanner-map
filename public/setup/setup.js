@@ -1031,27 +1031,46 @@ window.resetToDetected = function() {
 // Update city field from coordinates using reverse geocoding
 async function updateCityFromCoordinates(lat, lng) {
   try {
+    // Only run if we're on the geocoding step
     const cityInput = document.getElementById('geo-city');
     if (!cityInput) return; // Geocoding step not rendered yet
+    
+    // Get geocoding provider and API key from form to use for reverse geocoding
+    const provider = document.querySelector('input[name="geocoding-provider"]:checked')?.value || 'nominatim';
+    const locationiqKeyInput = document.getElementById('locationiq-key');
+    const locationiqKey = locationiqKeyInput?.value || null;
     
     // Show loading state
     const originalValue = cityInput.value;
     cityInput.placeholder = 'Looking up city...';
     
-    const result = await api('/api/setup/reverse-geocode', 'POST', { lat, lng });
+    const result = await api('/api/setup/reverse-geocode', 'POST', { 
+      lat, 
+      lng,
+      apiKey: provider === 'locationiq' ? locationiqKey : null
+    });
     
     if (result.success && result.city) {
       cityInput.value = result.city;
       cityInput.placeholder = 'Baltimore';
-      // Also update state if available
+      
+      // Auto-select state if state code is available
       const stateSelect = document.getElementById('geo-state');
-      if (stateSelect && result.state) {
-        // Try to match state name or code
-        const stateOption = Array.from(stateSelect.options).find(opt => 
-          opt.value === result.state || opt.text.includes(result.state)
-        );
-        if (stateOption) {
-          stateSelect.value = stateOption.value;
+      if (stateSelect && result.stateCode) {
+        // Try to set state by code first (most reliable)
+        if (stateSelect.querySelector(`option[value="${result.stateCode}"]`)) {
+          stateSelect.value = result.stateCode;
+          // Trigger change event to load counties
+          stateSelect.dispatchEvent(new Event('change'));
+        } else if (result.state) {
+          // Fallback: try to match by state name
+          const stateOption = Array.from(stateSelect.options).find(opt => 
+            opt.text.toLowerCase().includes(result.state.toLowerCase())
+          );
+          if (stateOption) {
+            stateSelect.value = stateOption.value;
+            stateSelect.dispatchEvent(new Event('change'));
+          }
         }
       }
     } else {
@@ -2514,10 +2533,20 @@ async function autoDetectCountiesFromMapLocation(lat, lng) {
     const currentContent = container.innerHTML;
     container.innerHTML = '<div class="county-list-loading">Finding counties within 20 miles</div>';
     
+    // Get geocoding provider and API key from form
+    const provider = document.querySelector('input[name="geocoding-provider"]:checked')?.value || 'nominatim';
+    const locationiqKeyInput = document.getElementById('locationiq-key');
+    const googleMapsKeyInput = document.getElementById('google-maps-key');
+    const locationiqKey = locationiqKeyInput?.value || null;
+    const googleMapsKey = googleMapsKeyInput?.value || null;
+    
     const result = await api('/api/setup/counties-within-radius', 'POST', {
       lat: lat,
       lng: lng,
-      stateCode: stateSelect.value
+      stateCode: stateSelect.value,
+      geocodingProvider: provider,
+      locationiqKey: locationiqKey,
+      googleMapsKey: googleMapsKey
     });
     
     if (result.counties && result.counties.length > 0) {
