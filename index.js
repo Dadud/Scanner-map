@@ -63,6 +63,7 @@ function loadConfigToEnv() {
     'WEBSERVER_PASSWORD': config.admin.tempPassword || '',
     
     // Discord
+    'DISCORD_ENABLED': String(config.discord.enabled || false),
     'DISCORD_TOKEN': config.discord.token || '',
     'CLIENT_ID': config.discord.clientId || '',
     

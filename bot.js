@@ -119,6 +119,7 @@ require('dotenv').config();
 const {
   BOT_PORT: PORT,  
   PUBLIC_DOMAIN,
+  DISCORD_ENABLED,
   DISCORD_TOKEN,
   MAPPED_TALK_GROUPS: mappedTalkGroupsString,
   ENABLE_MAPPED_TALK_GROUPS = 'true',
@@ -1265,10 +1266,15 @@ async function initializeBot() {
     await startBotServices();
 
     // Step 8: Start webserver last
-    if (WEBSERVER_PORT && (GOOGLE_MAPS_API_KEY || LOCATIONIQ_API_KEY)) {
+    // Check if geocoding is enabled and we have either an API key or Nominatim (which doesn't need a key)
+    const GEOCODING_PROVIDER = process.env.GEOCODING_PROVIDER || 'nominatim';
+    const hasGeocodingApiKey = !!(GOOGLE_MAPS_API_KEY || LOCATIONIQ_API_KEY);
+    const usingNominatim = GEOCODING_PROVIDER === 'nominatim';
+    
+    if (WEBSERVER_PORT && (hasGeocodingApiKey || usingNominatim)) {
       await startWebserver();
     } else {
-      logger.warn('Webserver not started: WEBSERVER_PORT or geocoding API key (GOOGLE_MAPS_API_KEY or LOCATIONIQ_API_KEY) not configured');
+      logger.warn('Webserver not started: WEBSERVER_PORT or geocoding not properly configured');
     }
 
     logger.info('Bot initialization completed successfully!');
@@ -6558,10 +6564,25 @@ async function startBotServices() {
       logger.info(`Bot server is running on port ${PORT_NUM}`);
     });
 
-    // Login to Discord
-    await client.login(DISCORD_TOKEN);
-    discordClientReady = true;
-    logger.info('Discord bot logged in successfully.');
+    // Login to Discord only if enabled
+    if (DISCORD_ENABLED === 'true' && DISCORD_TOKEN) {
+      await client.login(DISCORD_TOKEN);
+      discordClientReady = true;
+      logger.info('Discord bot logged in successfully.');
+    } else {
+      logger.info('Discord integration is disabled. Skipping Discord login.');
+      discordClientReady = false;
+      // Still mark as ready so the app can function without Discord
+      isBootComplete = true;
+      
+      // Start transcription process if needed (normally started in Discord ready event)
+      if (effectiveTranscriptionMode === 'local') {
+        logger.info('Initializing local transcription process...');
+        startTranscriptionProcess();
+      } else {
+        logger.info(`Transcription mode set to '${effectiveTranscriptionMode}'. Local Python process will not be started.`);
+      }
+    }
 
   } catch (error) {
     logger.error('Error starting bot services:', error);
