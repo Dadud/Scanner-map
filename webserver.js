@@ -1779,6 +1779,195 @@ app.post('/api/calls/undo-last-purge', async (req, res) => {
   }
 });
 
+// ============================================
+// Admin Settings Routes (Web UI Configuration)
+// ============================================
+
+// Try to load config manager (may not exist in legacy setups)
+let configManager = null;
+try {
+  const configModule = require('./config-manager');
+  configManager = configModule.configManager;
+  configManager.init();
+  console.log('[Webserver] Config manager loaded for settings management');
+} catch (err) {
+  console.log('[Webserver] Config manager not available, using .env configuration');
+}
+
+// Get current configuration (admin only)
+app.get('/api/admin/settings', adminAuth, async (req, res) => {
+  if (!configManager) {
+    return res.status(501).json({ error: 'Settings management not available in this installation' });
+  }
+  
+  try {
+    const publicConfig = configManager.getPublicConfig();
+    res.json(publicConfig);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get specific settings section (admin only)
+app.get('/api/admin/settings/:section', adminAuth, async (req, res) => {
+  if (!configManager) {
+    return res.status(501).json({ error: 'Settings management not available' });
+  }
+  
+  const { section } = req.params;
+  const config = configManager.getAll();
+  
+  if (!config[section]) {
+    return res.status(404).json({ error: 'Section not found' });
+  }
+  
+  // Remove sensitive fields
+  const sectionData = { ...config[section] };
+  const sensitiveKeys = ['passwordHash', 'salt', 'token', 'apiKey', 'secretKey', 'openaiKey', 'locationiqKey', 'googleMapsKey'];
+  for (const key of sensitiveKeys) {
+    if (sectionData[key]) {
+      sectionData[`has${key.charAt(0).toUpperCase() + key.slice(1)}`] = true;
+      delete sectionData[key];
+    }
+  }
+  
+  res.json(sectionData);
+});
+
+// Update settings section (admin only)
+app.put('/api/admin/settings/:section', adminAuth, async (req, res) => {
+  if (!configManager) {
+    return res.status(501).json({ error: 'Settings management not available' });
+  }
+  
+  const { section } = req.params;
+  const updates = req.body;
+  
+  try {
+    // Handle password hashing for admin section
+    if (section === 'admin' && updates.password) {
+      const { hash, salt } = configManager.hashPassword(updates.password);
+      updates.passwordHash = hash;
+      updates.salt = salt;
+      delete updates.password;
+    }
+    
+    // Update each field
+    for (const [key, value] of Object.entries(updates)) {
+      configManager.set(`${section}.${key}`, value);
+    }
+    
+    // Validate after update
+    const validation = configManager.validate();
+    if (!validation.valid) {
+      return res.status(400).json({ error: 'Invalid configuration', details: validation.errors });
+    }
+    
+    // Save
+    configManager.save();
+    
+    res.json({ success: true, message: 'Settings updated' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Test connection endpoint (admin only)
+app.post('/api/admin/test-connection', adminAuth, async (req, res) => {
+  const { type, config } = req.body;
+  
+  try {
+    let result = { success: false, message: 'Unknown connection type' };
+    
+    switch (type) {
+      case 'ollama':
+        try {
+          const ollamaRes = await fetch(`${config.url}/api/version`, { timeout: 5000 });
+          result = ollamaRes.ok 
+            ? { success: true, message: 'Ollama is running' }
+            : { success: false, message: 'Ollama not responding correctly' };
+        } catch (e) {
+          result = { success: false, message: `Connection failed: ${e.message}` };
+        }
+        break;
+        
+      case 'openai':
+        try {
+          const openaiRes = await fetch('https://api.openai.com/v1/models', {
+            headers: { 'Authorization': `Bearer ${config.apiKey}` },
+            timeout: 5000
+          });
+          result = openaiRes.ok 
+            ? { success: true, message: 'OpenAI API key is valid' }
+            : { success: false, message: 'Invalid OpenAI API key' };
+        } catch (e) {
+          result = { success: false, message: `Connection failed: ${e.message}` };
+        }
+        break;
+        
+      case 'discord':
+        try {
+          const discordRes = await fetch('https://discord.com/api/v10/users/@me', {
+            headers: { 'Authorization': `Bot ${config.token}` },
+            timeout: 5000
+          });
+          if (discordRes.ok) {
+            const botInfo = await discordRes.json();
+            result = { success: true, message: `Connected as ${botInfo.username}` };
+          } else {
+            result = { success: false, message: 'Invalid Discord bot token' };
+          }
+        } catch (e) {
+          result = { success: false, message: `Connection failed: ${e.message}` };
+        }
+        break;
+    }
+    
+    res.json(result);
+  } catch (error) {
+    res.json({ success: false, message: error.message });
+  }
+});
+
+// Export configuration as .env (admin only)
+app.get('/api/admin/export-env', adminAuth, (req, res) => {
+  if (!configManager) {
+    return res.status(501).json({ error: 'Settings management not available' });
+  }
+  
+  try {
+    const envContent = configManager.exportToEnv();
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Content-Disposition', 'attachment; filename=".env"');
+    res.send(envContent);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Download configuration backup (admin only)
+app.get('/api/admin/backup', adminAuth, (req, res) => {
+  if (!configManager) {
+    return res.status(501).json({ error: 'Settings management not available' });
+  }
+  
+  try {
+    const config = configManager.getAll();
+    // Remove sensitive data for backup
+    const backup = JSON.parse(JSON.stringify(config));
+    
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename="scanner-map-config.json"');
+    res.send(JSON.stringify(backup, null, 2));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================
+// End Admin Settings Routes
+// ============================================
+
 // General error handling middleware
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);

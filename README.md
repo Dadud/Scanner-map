@@ -13,13 +13,17 @@ Ingests calls from SDRTrunk, TrunkRecorder, or any **rdio-scanner compatible end
 
 ## 🔥 Recent Updates
 
+- **🚀 NEW: Zero-config web setup wizard** — Run `node index.js` and configure everything through your browser. No more editing `.env` files!
+- **Web-based configuration** — All settings manageable through browser interface
+- **One-command startup** — Single command to run everything
+- **Automatic .env migration** — Existing installations can import their .env settings
 - **Admin-restricted marker editing** — Map marker editing now locked behind admin user when authentication is enabled
 - **Purge calls from map** — New admin-only feature to remove calls by talkgroup category and time range, includes undo button to restore accidentally purged calls
 - Full **one-command integration** (no multiple terminals)  
 - Auto-generated API keys & admin users  
 - Improved **AI summaries & Ask AI** features  
 - New **S3 audio storage option**  
-- **OpenAI transcription prompting** — configure custom prompts in `.env` to fine‑tune transcription behavior  
+- **OpenAI transcription prompting** — configure custom prompts to fine‑tune transcription behavior  
 - **Two-tone detection** — powered by [icad-tone-detection](https://github.com/TheGreatCodeholio/icad-tone-detection).  
   - Detects fire/EMS tones in radio calls  
   - Optionally restrict address extraction to toned calls only, or combine tone + address detection for greater accuracy  
@@ -30,7 +34,9 @@ Ingests calls from SDRTrunk, TrunkRecorder, or any **rdio-scanner compatible end
 ## ✨ Features
 
 ### 🚀 Core
-- **One-command startup:** `node bot.js`
+- **Zero-config setup:** Run once, configure in browser
+- **One-command startup:** `node index.js`
+- **Web-based setup wizard:** No more editing config files
 - **Automatic setup:** database, API keys, talkgroups, admin accounts
 - **Integrated services:** Discord bot + webserver run together
 
@@ -81,6 +87,21 @@ Installation scripts handle dependencies, configuration, and setup.
 - (Optional) Remote transcription server (e.g., [speaches](https://github.com/speaches-ai/speaches) or ICAD)
 
 ### Quick Start
+
+#### Option 1: New Installation (Recommended)
+```bash
+# Install dependencies
+npm install --legacy-peer-deps
+
+# Run the setup wizard
+node index.js
+```
+
+Open `http://localhost:8080/setup` in your browser and follow the wizard.
+
+**Note:** The `--legacy-peer-deps` flag is required due to Discord.js dependency conflicts. This is safe and commonly used.
+
+#### Option 2: Using Installation Scripts
 ```bash
 # Linux
 sudo bash linux_install_scanner_map.sh
@@ -89,29 +110,38 @@ sudo bash linux_install_scanner_map.sh
 .\install_scanner_map.ps1
 ```
 
-Then:
-```bash
-cd scanner-map
-source .venv/bin/activate   # Linux
-node bot.js
-```
+Then run `node index.js` and complete setup in your browser.
 
 ---
 
 ## ⚙️ Configuration
 
-All main settings are in `.env`. Key options:
+### Web-Based Configuration (New!)
 
+All settings are now configurable through the browser:
+1. Run `node index.js`
+2. Open `http://localhost:8080/setup`
+3. Follow the setup wizard
+
+Settings are stored in `data/config.json` (auto-encrypted for sensitive values).
+
+### Legacy .env Configuration
+
+For existing installations, `.env` files are still supported. You can migrate to the new system:
+1. Run `node index.js`
+2. Choose "Import from .env" in the setup wizard
+
+Key `.env` options (for reference):
 - `DISCORD_TOKEN` — your bot token  
-- `Maps_API_KEY` / `LOCATIONIQ_API_KEY` — geocoding provider  
+- `GOOGLE_MAPS_API_KEY` / `LOCATIONIQ_API_KEY` — geocoding provider  
 - `MAPPED_TALK_GROUPS` — talkgroups to monitor  
 - `TRANSCRIPTION_MODE` — `local`, `remote`, `openai`, or `icad`  
 - `STORAGE_MODE` — `local` or `s3`  
-- `OPENAI_PROMPT` — (if using OpenAI) provide a custom transcription prompt  
-- `ENABLE_TONE_DETECTION` — enable/disable two‑tone detection  
+- `ENABLE_TWO_TONE_MODE` — enable/disable two‑tone detection  
 
-Other files to edit:
+Other files:
 - `public/config.js` ← map defaults (center, zoom, icons, etc.)  
+- `data/config.json` ← main configuration (created by wizard)
 - `data/apikeys.json` ← auto-generated on first run  
 
 ---

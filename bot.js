@@ -1,5 +1,116 @@
 // bot.js - Main Discord bot application with integrated webserver and initialization
 
+// Check if running directly (not from index.js) and config.json exists
+// If so, load config.json into environment variables
+const fs = require('fs');
+const pathModule = require('path');
+
+function loadConfigIfNeeded() {
+  const configPath = pathModule.join(__dirname, 'data', 'config.json');
+  
+  // If already have key env vars set (from index.js), skip
+  if (process.env.SCANNER_MAP_CONFIG_LOADED === 'true') {
+    return;
+  }
+  
+  // Check if config.json exists and is complete
+  if (fs.existsSync(configPath)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      
+      if (config.setupComplete) {
+        console.log('[Bot] Loading configuration from config.json');
+        
+        // Load config manager and inject to env
+        const { configManager } = require('./config-manager');
+        configManager.init();
+        const cfg = configManager.getAll();
+        
+        // Map config to environment variables
+        const envMapping = {
+          'BOT_PORT': cfg.server?.botPort || '3306',
+          'WEBSERVER_PORT': String(cfg.server?.port || 8080),
+          'PUBLIC_DOMAIN': cfg.server?.publicDomain || 'localhost',
+          'TIMEZONE': cfg.server?.timezone || 'America/New_York',
+          'ENABLE_AUTH': String(cfg.admin?.authEnabled || false),
+          'WEBSERVER_PASSWORD': cfg.admin?.tempPassword || '',
+          'DISCORD_TOKEN': cfg.discord?.token || '',
+          'CLIENT_ID': cfg.discord?.clientId || '',
+          'TRANSCRIPTION_MODE': cfg.transcription?.mode || 'local',
+          'TRANSCRIPTION_DEVICE': cfg.transcription?.device || 'cpu',
+          'WHISPER_MODEL': cfg.transcription?.whisperModel || 'large-v3',
+          'FASTER_WHISPER_SERVER_URL': cfg.transcription?.remoteUrl || '',
+          'OPENAI_TRANSCRIPTION_MODEL': cfg.transcription?.openaiModel || 'whisper-1',
+          'ICAD_URL': cfg.transcription?.icadUrl || '',
+          'ICAD_API_KEY': cfg.transcription?.icadApiKey || '',
+          'ICAD_PROFILE': cfg.transcription?.icadProfile || 'tiny',
+          'LOCATIONIQ_API_KEY': cfg.geocoding?.locationiqKey || '',
+          'GOOGLE_MAPS_API_KEY': cfg.geocoding?.googleMapsKey || '',
+          'GEOCODING_CITY': cfg.geocoding?.city || '',
+          'GEOCODING_STATE': cfg.geocoding?.state || '',
+          'GEOCODING_COUNTRY': cfg.geocoding?.country || 'US',
+          'GEOCODING_TARGET_COUNTIES': (cfg.geocoding?.counties || []).join(','),
+          'AI_PROVIDER': cfg.ai?.provider || 'ollama',
+          'OLLAMA_URL': cfg.ai?.ollamaUrl || 'http://localhost:11434',
+          'OLLAMA_MODEL': cfg.ai?.ollamaModel || 'llama3.1:8b',
+          'OPENAI_API_KEY': cfg.ai?.openaiKey || cfg.transcription?.openaiKey || '',
+          'OPENAI_MODEL': cfg.ai?.openaiModel || 'gpt-4o-mini',
+          'SUMMARY_LOOKBACK_HOURS': String(cfg.ai?.summaryLookbackHours || 1),
+          'ASK_AI_LOOKBACK_HOURS': String(cfg.ai?.askAiLookbackHours || 8),
+          'STORAGE_MODE': cfg.storage?.mode || 'local',
+          'S3_ENDPOINT': cfg.storage?.s3Endpoint || '',
+          'S3_BUCKET_NAME': cfg.storage?.s3Bucket || '',
+          'S3_ACCESS_KEY_ID': cfg.storage?.s3AccessKey || '',
+          'S3_SECRET_ACCESS_KEY': cfg.storage?.s3SecretKey || '',
+          'MAPPED_TALK_GROUPS': (cfg.talkgroups?.mapped || []).join(','),
+          'ENABLE_MAPPED_TALK_GROUPS': 'true',
+          'ENABLE_TWO_TONE_MODE': String(cfg.toneDetection?.enabled || false),
+          'TWO_TONE_TALK_GROUPS': (cfg.talkgroups?.twoTone?.talkgroups || []).join(','),
+          'TWO_TONE_QUEUE_SIZE': String(cfg.talkgroups?.twoTone?.queueSize || 1),
+          'TONE_DETECTION_TYPE': cfg.toneDetection?.type || 'auto',
+          'TWO_TONE_MIN_TONE_LENGTH': String(cfg.toneDetection?.minToneLength || 0.7),
+          'TWO_TONE_MAX_TONE_LENGTH': String(cfg.toneDetection?.maxToneLength || 3.0),
+          'TWO_TONE_BW_HZ': '50',
+          'TWO_TONE_MIN_PAIR_SEPARATION_HZ': '100',
+          'PULSED_MIN_CYCLES': '3',
+          'PULSED_MIN_ON_MS': '50',
+          'PULSED_MAX_ON_MS': '500',
+          'PULSED_MIN_OFF_MS': '25',
+          'PULSED_MAX_OFF_MS': '800',
+          'PULSED_BANDWIDTH_HZ': '50',
+          'LONG_TONE_MIN_LENGTH': '0.5',
+          'LONG_TONE_BANDWIDTH_HZ': '75',
+          'TONE_DETECTION_THRESHOLD': String(cfg.toneDetection?.threshold || 0.3),
+          'TONE_FREQUENCY_BAND': (cfg.toneDetection?.frequencyBand || [300, 1500]).join(','),
+          'TONE_TIME_RESOLUTION_MS': String(cfg.toneDetection?.timeResolutionMs || 15),
+          'API_KEY_FILE': 'data/apikeys.json',
+        };
+        
+        // Add talk group descriptions
+        for (const [id, desc] of Object.entries(cfg.talkgroups?.descriptions || {})) {
+          envMapping[`TALK_GROUP_${id}`] = desc;
+        }
+        
+        // Inject into process.env (only if not already set)
+        for (const [key, value] of Object.entries(envMapping)) {
+          if (!process.env[key] && value) {
+            process.env[key] = value;
+          }
+        }
+        
+        process.env.SCANNER_MAP_CONFIG_LOADED = 'true';
+        return;
+      }
+    } catch (error) {
+      console.log('[Bot] Could not load config.json, falling back to .env');
+    }
+  }
+}
+
+// Try to load from config.json first
+loadConfigIfNeeded();
+
+// Then load .env (won't overwrite existing values)
 require('dotenv').config();
 
 // Get environment variables first, before any usage

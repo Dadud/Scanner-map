@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scanner Map - Setup Wizard</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="setup.css">
+</head>
+<body>
+  <div class="setup-container">
+    <!-- Welcome Screen (no login required) -->
+    <div id="login-screen" class="screen" style="display: none;">
+      <!-- Login screen hidden - setup is open during initial configuration -->
+    </div>
+
+    <!-- Setup Wizard -->
+    <div id="wizard-screen" class="screen active">
+      <!-- Progress Bar -->
+      <div class="progress-container">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="step-indicators" id="step-indicators"></div>
+      </div>
+
+      <!-- Step Content -->
+      <div class="wizard-content" id="wizard-content">
+        <!-- Steps will be rendered here -->
+      </div>
+
+      <!-- Navigation -->
+      <div class="wizard-nav">
+        <button id="btn-prev" class="btn btn-secondary" disabled>← Back</button>
+        <button id="btn-next" class="btn btn-primary">Next →</button>
+      </div>
+    </div>
+
+    <!-- Completion Screen -->
+    <div id="complete-screen" class="screen">
+      <div class="complete-content">
+        <div class="success-icon">✓</div>
+        <h1>Setup Complete!</h1>
+        <p>Scanner Map is configured and ready to use.</p>
+        
+        <div class="summary-box" id="setup-summary">
+          <!-- Summary will be populated -->
+        </div>
+        
+        <button id="btn-launch" class="btn btn-primary btn-large">Launch Scanner Map</button>
+        
+        <div class="backup-notice">
+          <button id="btn-download-config" class="btn btn-secondary">Download Configuration Backup</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notifications -->
+  <div id="toast-container"></div>
+
+  <script src="setup.js"></script>
+</body>
+</html>
+

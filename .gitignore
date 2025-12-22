@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Environment and configuration
+.env
+.env.local
+.env.*.local
+data/config.json
+data/.secret
+
+# Logs
+*.log
+logs/
+combined.log
+error.log
+
+# Database
+*.db
+
+# Audio files
+audio/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Uploads
+uploads/
+
+# Cache
+__pycache__/
+*.pyc
+.cache/
+
+# Build
+dist/
+build/
+
