@@ -14,6 +14,7 @@ Ingests calls from SDRTrunk, TrunkRecorder, or any **rdio-scanner compatible end
 ## 🔥 Recent Updates
 
 - **🚀 NEW: Zero-config web setup wizard** — Run `node index.js` and configure everything through your browser. No more editing `.env` files!
+- **🚀 NEW: Easy startup scripts** — Use `start.bat` (Windows) or `start.sh` (Linux/Mac) to automatically install dependencies and launch the app
 - **Web-based configuration** — All settings manageable through browser interface
 - **One-command startup** — Single command to run everything
 - **Automatic .env migration** — Existing installations can import their .env settings
@@ -88,7 +89,23 @@ Installation scripts handle dependencies, configuration, and setup.
 
 ### Quick Start
 
-#### Option 1: New Installation (Recommended)
+#### Option 1: Using Startup Scripts (Easiest - Recommended)
+```bash
+# Windows
+start.bat
+
+# Linux/Mac
+./start.sh
+```
+
+The script will automatically:
+- Check for Node.js
+- Install dependencies if needed
+- Launch the application
+
+Then open `http://localhost:8082/setup` in your browser and follow the wizard.
+
+#### Option 2: Manual Installation
 ```bash
 # Install dependencies
 npm install --legacy-peer-deps
@@ -97,11 +114,11 @@ npm install --legacy-peer-deps
 node index.js
 ```
 
-Open `http://localhost:8080/setup` in your browser and follow the wizard.
+Open `http://localhost:8082/setup` in your browser and follow the wizard.
 
 **Note:** The `--legacy-peer-deps` flag is required due to Discord.js dependency conflicts. This is safe and commonly used.
 
-#### Option 2: Using Installation Scripts
+#### Option 3: Using Full Installation Scripts
 ```bash
 # Linux
 sudo bash linux_install_scanner_map.sh
@@ -110,7 +127,7 @@ sudo bash linux_install_scanner_map.sh
 .\install_scanner_map.ps1
 ```
 
-Then run `node index.js` and complete setup in your browser.
+Then run `node index.js` (or use `start.bat`/`start.sh`) and complete setup in your browser.
 
 ---
 
