@@ -73,13 +73,27 @@ app.post('/api/setup/login', (req, res) => {
 
 // Get current setup status
 app.get('/api/setup/status', (req, res) => {
-  const config = configManager.init().getAll();
-  res.json({
-    setupComplete: config.setupComplete,
-    currentStep: setupSession.currentStep,
-    hasExistingEnv: fs.existsSync('.env'),
-    passwordSet: !!setupSession.tempPassword
-  });
+  try {
+    const config = configManager.init().getAll();
+    const setupComplete = config.setupComplete === true; // Explicitly check for true
+    
+    console.log('[Setup] Status check - setupComplete:', setupComplete, 'raw value:', config.setupComplete);
+    
+    res.json({
+      setupComplete: setupComplete,
+      currentStep: setupSession.currentStep,
+      hasExistingEnv: fs.existsSync('.env'),
+      passwordSet: !!setupSession.tempPassword
+    });
+  } catch (error) {
+    console.error('[Setup] Error getting status:', error);
+    res.json({
+      setupComplete: false,
+      currentStep: 1,
+      hasExistingEnv: fs.existsSync('.env'),
+      passwordSet: false
+    });
+  }
 });
 
 // ============================================
@@ -242,7 +256,7 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
     // If we have state center, distribute counties around it
     // Otherwise, just select all counties (fallback)
     const selectedCounties = [];
-    const radiusMiles = 50;
+    const radiusMiles = 20;
     
     if (stateCenter) {
       // Calculate distance from center point to state center
@@ -626,7 +640,9 @@ app.post('/api/setup/import-talkgroups', requireSetupAuth, async (req, res) => {
         mode TEXT,
         description TEXT,
         tag TEXT,
-        county TEXT
+        county TEXT,
+        frequency REAL,
+        type TEXT
       )`, (err) => {
         if (err) reject(err);
         else resolve();
@@ -637,8 +653,18 @@ app.post('/api/setup/import-talkgroups', requireSetupAuth, async (req, res) => {
     for (const tg of tgData) {
       await new Promise((resolve, reject) => {
         db.run(
-          `INSERT OR REPLACE INTO talk_groups (id, hex, alpha_tag, mode, description, tag, county) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [tg.id, tg.hex, tg.alphaTag, tg.mode, tg.description, tg.tag, tg.county],
+          `INSERT OR REPLACE INTO talk_groups (id, hex, alpha_tag, mode, description, tag, county, frequency, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            tg.id, 
+            tg.hex || `0x${tg.id.toString(16).toUpperCase()}`, 
+            tg.alphaTag || tg.alpha_tag || '', 
+            tg.mode || 'D', 
+            tg.description || '', 
+            tg.tag || '', 
+            tg.county || '',
+            tg.frequency || null,
+            tg.type || 'digital'
+          ],
           (err) => {
             if (err) reject(err);
             else resolve();
@@ -719,6 +745,64 @@ app.get('/api/setup/detect-gpu', requireSetupAuth, async (req, res) => {
     res.json(result);
   } catch (error) {
     res.json({ available: false });
+  }
+});
+
+// Fetch towns/cities within selected counties
+app.post('/api/setup/fetch-towns', async (req, res) => {
+  try {
+    const { counties, stateCode, apiKey } = req.body;
+    
+    if (!counties || counties.length === 0) {
+      return res.status(400).json({ error: 'Counties are required' });
+    }
+    
+    if (!stateCode) {
+      return res.status(400).json({ error: 'State code is required' });
+    }
+    
+    // Try to get LocationIQ key from config if available (optional, for better results)
+    const config = configManager.init().getAll();
+    const locationiqKey = apiKey || config.geocoding?.locationiqKey;
+    
+    const { fetchTownsInCounties } = require('./setup-detection');
+    const result = await fetchTownsInCounties(counties, stateCode, locationiqKey);
+    
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json({ error: result.error || 'Failed to fetch towns' });
+    }
+  } catch (error) {
+    console.error('[Setup] Fetch towns error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Reverse geocode coordinates to find nearest city
+app.post('/api/setup/reverse-geocode', async (req, res) => {
+  try {
+    const { lat, lng, apiKey } = req.body;
+    
+    if (!lat || !lng) {
+      return res.status(400).json({ error: 'lat and lng are required' });
+    }
+    
+    // Try to get LocationIQ key from config if available
+    const config = configManager.init().getAll();
+    const locationiqKey = apiKey || config.geocoding?.locationiqKey;
+    
+    const { reverseGeocode } = require('./setup-detection');
+    const result = await reverseGeocode(parseFloat(lat), parseFloat(lng), locationiqKey);
+    
+    if (result.success) {
+      res.json(result);
+    } else {
+      res.status(500).json({ error: result.error || 'Reverse geocoding failed' });
+    }
+  } catch (error) {
+    console.error('[Setup] Reverse geocoding error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

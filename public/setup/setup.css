@@ -40,12 +40,12 @@ body {
 
 /* Screens */
 .screen {
-  display: none;
+  display: none !important;
   animation: fadeIn 0.3s ease;
 }
 
 .screen.active {
-  display: block;
+  display: block !important;
 }
 
 @keyframes fadeIn {
@@ -603,10 +603,13 @@ input:checked + .toggle-slider:before {
 
 /* Complete Screen */
 #complete-screen {
-  display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
+}
+
+#complete-screen.active {
+  display: flex;
 }
 
 .complete-content {

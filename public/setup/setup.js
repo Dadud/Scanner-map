@@ -43,6 +43,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     const response = await fetch('/api/setup/status');
     const status = await response.json();
     
+    console.log('[Setup] Status check:', status);
+    
+    // If setup is already complete, show completion screen
+    if (status.setupComplete === true) {
+      console.log('[Setup] Setup already complete, showing completion screen');
+      wizardScreen.classList.remove('active');
+      wizardScreen.style.display = 'none';
+      completeScreen.classList.add('active');
+      completeScreen.style.display = 'flex';
+      return;
+    }
+    
+    // Ensure wizard screen is active and completion screen is hidden
+    console.log('[Setup] Setup incomplete, showing wizard');
+    wizardScreen.classList.add('active');
+    completeScreen.classList.remove('active');
+    completeScreen.style.display = 'none';
+    
     if (status.hasExistingEnv) {
       // Show import notice if env exists
       const notice = document.getElementById('env-import-notice');
@@ -50,6 +68,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   } catch (error) {
     console.error('Error checking status:', error);
+    // On error, assume setup is needed and show wizard
+    wizardScreen.classList.add('active');
+    completeScreen.classList.remove('active');
+    completeScreen.style.display = 'none';
   }
   
   // Setup event listeners (skip login form)
@@ -103,6 +125,12 @@ async function api(endpoint, method = 'GET', body = null) {
   }
   
   const response = await fetch(endpoint, options);
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: `HTTP ${response.status}: ${response.statusText}` }));
+    throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+  }
+  
   return response.json();
 }
 
@@ -141,28 +169,39 @@ async function validateAndSaveStep() {
       const confirmPassword = document.getElementById('admin-confirm-password').value;
       const authEnabled = document.getElementById('auth-enabled').checked;
       
-      if (!username || !password) {
-        showToast('Please fill in username and password', 'error');
-        return false;
+      // Admin account is optional - only validate if user wants to enable auth
+      if (authEnabled) {
+        // If auth is enabled, require username and password
+        if (!username || !password) {
+          showToast('Please fill in username and password to enable authentication', 'error');
+          return false;
+        }
+        
+        if (password !== confirmPassword) {
+          showToast('Passwords do not match', 'error');
+          return false;
+        }
+        
+        if (password.length < 8) {
+          showToast('Password must be at least 8 characters', 'error');
+          return false;
+        }
+        
+        await api('/api/setup/config/admin', 'POST', {
+          username,
+          password,
+          authEnabled: true
+        });
+        config.admin = { username, authEnabled: true };
+      } else {
+        // Auth disabled - save with empty credentials
+        await api('/api/setup/config/admin', 'POST', {
+          username: username || 'admin',
+          password: '',
+          authEnabled: false
+        });
+        config.admin = { username: username || 'admin', authEnabled: false };
       }
-      
-      if (password !== confirmPassword) {
-        showToast('Passwords do not match', 'error');
-        return false;
-      }
-      
-      if (password.length < 8) {
-        showToast('Password must be at least 8 characters', 'error');
-        return false;
-      }
-      
-      await api('/api/setup/config/admin', 'POST', {
-        username,
-        password,
-        authEnabled
-      });
-      
-      config.admin = { username, authEnabled };
       return true;
     }
     
@@ -262,7 +301,11 @@ async function validateAndSaveStep() {
       
       const geocodingConfig = { provider, enabled: true };
       
-      if (provider === 'locationiq') {
+      if (provider === 'nominatim') {
+        // Nominatim doesn't require an API key - no validation needed
+        geocodingConfig.locationiqKey = null;
+        geocodingConfig.googleMapsKey = null;
+      } else if (provider === 'locationiq') {
         geocodingConfig.locationiqKey = document.getElementById('locationiq-key').value;
         if (!geocodingConfig.locationiqKey) {
           showToast('Please enter your LocationIQ API key', 'error');
@@ -281,6 +324,12 @@ async function validateAndSaveStep() {
       geocodingConfig.country = document.getElementById('geo-country').value;
       // Get counties from selectedCounties Set
       geocodingConfig.counties = Array.from(selectedCounties);
+      // Get towns from the towns list
+      const townsTextarea = document.getElementById('geo-towns');
+      if (townsTextarea) {
+        const townsText = townsTextarea.value.trim();
+        geocodingConfig.towns = townsText ? townsText.split('\n').map(t => t.trim()).filter(t => t.length > 0) : [];
+      }
       
       await api('/api/setup/config/geocoding', 'POST', geocodingConfig);
       config.geocoding = geocodingConfig;
@@ -375,7 +424,7 @@ async function renderStep(step) {
       await renderTranscriptionStep();
       break;
     case 'geocoding':
-      renderGeocodingStep();
+      await renderGeocodingStep();
       break;
     case 'ai':
       renderAiStep();
@@ -508,41 +557,68 @@ window.refreshOllamaModels = async function() {
 
 function renderAdminStep() {
   wizardContent.innerHTML = `
-    <h2><span class="step-icon">🔐</span> Admin Account</h2>
-    <p>Set up your administrator credentials for accessing settings.</p>
+    <h2><span class="step-icon">🔐</span> Admin Account <span class="optional-badge">Optional</span></h2>
+    <p>Set up administrator credentials to protect your settings. You can skip this and configure it later.</p>
     
-    <div class="two-columns" style="margin-top: 24px;">
-      <div class="form-group">
-        <label for="admin-username">Username</label>
-        <input type="text" id="admin-username" value="admin" placeholder="admin">
+    <div style="margin-top: 16px; padding: 12px; background: rgba(0, 170, 255, 0.1); border: 1px solid var(--secondary); border-radius: 8px;">
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <span>ℹ️</span>
+        <strong>Authentication is optional</strong>
       </div>
-      <div></div>
-    </div>
-    
-    <div class="two-columns">
-      <div class="form-group">
-        <label for="admin-password">Password</label>
-        <input type="password" id="admin-password" placeholder="Enter a secure password">
-        <div class="help-text">Minimum 8 characters</div>
-      </div>
-      <div class="form-group">
-        <label for="admin-confirm-password">Confirm Password</label>
-        <input type="password" id="admin-confirm-password" placeholder="Confirm password">
-      </div>
+      <p style="color: var(--text-secondary); font-size: 0.9em; margin: 0;">
+        If you don't enable authentication, the map interface will be publicly accessible. You can always enable it later in the admin settings.
+      </p>
     </div>
     
     <hr class="section-divider">
     
-    <div class="checkbox-group">
+    <div class="checkbox-group" style="margin-top: 24px;">
       <label class="checkbox-item">
-        <input type="checkbox" id="auth-enabled">
+        <input type="checkbox" id="auth-enabled" onchange="toggleAdminFields()">
         <div class="item-content">
-          <div class="item-title">Require Authentication</div>
-          <div class="item-desc">Users must log in to view the map interface</div>
+          <div class="item-title">Enable Authentication</div>
+          <div class="item-desc">Require login to access the map interface and settings</div>
         </div>
       </label>
     </div>
+    
+    <div id="admin-fields" style="display: none; margin-top: 24px;">
+      <div class="two-columns">
+        <div class="form-group">
+          <label for="admin-username">Username</label>
+          <input type="text" id="admin-username" value="admin" placeholder="admin">
+        </div>
+        <div></div>
+      </div>
+      
+      <div class="two-columns">
+        <div class="form-group">
+          <label for="admin-password">Password</label>
+          <input type="password" id="admin-password" placeholder="Enter a secure password">
+          <div class="help-text">Minimum 8 characters</div>
+        </div>
+        <div class="form-group">
+          <label for="admin-confirm-password">Confirm Password</label>
+          <input type="password" id="admin-confirm-password" placeholder="Confirm password">
+        </div>
+      </div>
+    </div>
+    
+    <div style="margin-top: 24px; padding: 12px; background: var(--surface-light); border-radius: 8px;">
+      <p style="color: var(--text-secondary); font-size: 0.9em; margin: 0;">
+        <strong>Note:</strong> You can skip this step by leaving authentication disabled and clicking "Next". You can always set up an admin account later from the settings page.
+      </p>
+    </div>
   `;
+  
+  // Add toggle function
+  window.toggleAdminFields = function() {
+    const authEnabled = document.getElementById('auth-enabled').checked;
+    const adminFields = document.getElementById('admin-fields');
+    if (adminFields) {
+      adminFields.style.display = authEnabled ? 'block' : 'none';
+    }
+  };
 }
 
 function renderMapStep() {
@@ -567,7 +643,7 @@ function renderMapStep() {
     
     <div class="map-container" id="setup-map"></div>
     <div id="map-radius-info" style="display: none; margin-top: 8px;"></div>
-    <p class="map-hint">Click on the map to set the center point. Counties within a 50-mile radius will be auto-selected in the Geocoding step.</p>
+    <p class="map-hint">Click on the map to set the center point. Counties within a 20-mile radius will be auto-selected in the Geocoding step.</p>
     
     <div class="two-columns" style="margin-top: 16px;">
       <div class="form-group">
@@ -623,8 +699,11 @@ function renderMapStep() {
       // Store location for county selection
       mapCenterLocation = { lat: e.latlng.lat, lng: e.latlng.lng };
       
-      // Show info about 50-mile radius
+      // Show info about 20-mile radius
       showMapRadiusInfo(e.latlng.lat, e.latlng.lng);
+      
+      // Reverse geocode to find nearest city
+      await updateCityFromCoordinates(e.latlng.lat, e.latlng.lng);
     });
     
     // Handle marker drag
@@ -636,27 +715,32 @@ function renderMapStep() {
       // Store location for county selection
       mapCenterLocation = { lat: pos.lat, lng: pos.lng };
       
-      // Show info about 50-mile radius
+      // Show info about 20-mile radius
       showMapRadiusInfo(pos.lat, pos.lng);
+      
+      // Reverse geocode to find nearest city
+      await updateCityFromCoordinates(pos.lat, pos.lng);
     });
     
     // Handle coordinate input
-    document.getElementById('map-lat').addEventListener('change', () => {
+    document.getElementById('map-lat').addEventListener('change', async () => {
       updateMarker();
       const lat = parseFloat(document.getElementById('map-lat').value);
       const lng = parseFloat(document.getElementById('map-lng').value);
       if (!isNaN(lat) && !isNaN(lng)) {
         mapCenterLocation = { lat, lng };
         showMapRadiusInfo(lat, lng);
+        await updateCityFromCoordinates(lat, lng);
       }
     });
-    document.getElementById('map-lng').addEventListener('change', () => {
+    document.getElementById('map-lng').addEventListener('change', async () => {
       updateMarker();
       const lat = parseFloat(document.getElementById('map-lat').value);
       const lng = parseFloat(document.getElementById('map-lng').value);
       if (!isNaN(lat) && !isNaN(lng)) {
         mapCenterLocation = { lat, lng };
         showMapRadiusInfo(lat, lng);
+        await updateCityFromCoordinates(lat, lng);
       }
     });
     
@@ -687,15 +771,53 @@ window.resetToDetected = function() {
   }
 };
 
-// Show 50-mile radius circle and info
+// Update city field from coordinates using reverse geocoding
+async function updateCityFromCoordinates(lat, lng) {
+  try {
+    const cityInput = document.getElementById('geo-city');
+    if (!cityInput) return; // Geocoding step not rendered yet
+    
+    // Show loading state
+    const originalValue = cityInput.value;
+    cityInput.placeholder = 'Looking up city...';
+    
+    const result = await api('/api/setup/reverse-geocode', 'POST', { lat, lng });
+    
+    if (result.success && result.city) {
+      cityInput.value = result.city;
+      cityInput.placeholder = 'Baltimore';
+      // Also update state if available
+      const stateSelect = document.getElementById('geo-state');
+      if (stateSelect && result.state) {
+        // Try to match state name or code
+        const stateOption = Array.from(stateSelect.options).find(opt => 
+          opt.value === result.state || opt.text.includes(result.state)
+        );
+        if (stateOption) {
+          stateSelect.value = stateOption.value;
+        }
+      }
+    } else {
+      cityInput.placeholder = 'Baltimore';
+    }
+  } catch (error) {
+    console.error('Error reverse geocoding:', error);
+    const cityInput = document.getElementById('geo-city');
+    if (cityInput) {
+      cityInput.placeholder = 'Baltimore';
+    }
+  }
+}
+
+// Show 20-mile radius circle and info
 function showMapRadiusInfo(lat, lng) {
   // Remove existing radius circle if any
   if (window.radiusCircle) {
     map.removeLayer(window.radiusCircle);
   }
   
-  // Add 50-mile radius circle (approximately 0.72 degrees at this latitude)
-  const radiusMeters = 50 * 1609.34; // Convert miles to meters
+  // Add 20-mile radius circle (approximately 0.29 degrees at this latitude)
+  const radiusMeters = 20 * 1609.34; // Convert miles to meters
   window.radiusCircle = L.circle([lat, lng], {
     radius: radiusMeters,
     color: '#00ff88',
@@ -712,7 +834,7 @@ function showMapRadiusInfo(lat, lng) {
     infoDiv.innerHTML = `
       <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background: rgba(0, 255, 136, 0.1); border-radius: 4px;">
         <span>📡</span>
-        <span>50-mile radio range selected. Counties within this radius will be auto-selected in the Geocoding step.</span>
+        <span>20-mile radio range selected. Counties within this radius will be auto-selected in the Geocoding step.</span>
       </div>
     `;
   }
@@ -802,6 +924,14 @@ async function renderTalkgroupsStep() {
           <div class="item-desc">Upload a talkgroups.csv file</div>
         </div>
       </label>
+      
+      <label class="radio-item">
+        <input type="radio" name="import-method" value="manual">
+        <div class="item-content">
+          <div class="item-title">Manual Entry</div>
+          <div class="item-desc">Manually enter digital talkgroups or analog frequencies</div>
+        </div>
+      </label>
     </div>
     
     <div id="radioreference-import" style="margin-top: 24px;">
@@ -882,6 +1012,137 @@ async function renderTalkgroupsStep() {
       </div>
     </div>
     
+    <div id="manual-entry" style="display: none; margin-top: 24px;">
+      <div style="padding: 16px; background: var(--surface-light); border-radius: 8px;">
+        <h4 style="margin-bottom: 12px;">✏️ Manual Entry</h4>
+        <p style="color: var(--text-secondary); margin-bottom: 16px; font-size: 0.9em;">
+          Manually add digital talkgroups (trunked systems) or analog frequencies. Supports both digital and analog systems.
+        </p>
+        
+        <div class="radio-group" style="margin-bottom: 16px;">
+          <label class="radio-item">
+            <input type="radio" name="entry-type" value="digital" checked>
+            <div class="item-content">
+              <div class="item-title">Digital (Trunked)</div>
+              <div class="item-desc">Enter talkgroup IDs for trunked systems</div>
+            </div>
+          </label>
+          
+          <label class="radio-item">
+            <input type="radio" name="entry-type" value="analog">
+            <div class="item-content">
+              <div class="item-title">Analog</div>
+              <div class="item-desc">Enter frequencies in MHz for analog systems</div>
+            </div>
+          </label>
+        </div>
+        
+        <div id="digital-entry-form">
+          <div class="two-columns">
+            <div class="form-group">
+              <label for="manual-dec">Talkgroup ID (Decimal)</label>
+              <input type="number" id="manual-dec" placeholder="12345" min="0">
+              <div class="help-text">Numeric talkgroup ID</div>
+            </div>
+            <div class="form-group">
+              <label for="manual-hex">Hex (Optional)</label>
+              <input type="text" id="manual-hex" placeholder="0x3039" pattern="[0-9A-Fa-fx]+">
+              <div class="help-text">Auto-calculated from decimal</div>
+            </div>
+          </div>
+          
+          <div class="two-columns">
+            <div class="form-group">
+              <label for="manual-alpha">Alpha Tag</label>
+              <input type="text" id="manual-alpha" placeholder="Dispatch" maxlength="16">
+              <div class="help-text">Short identifier (max 16 chars)</div>
+            </div>
+            <div class="form-group">
+              <label for="manual-mode">Mode</label>
+              <select id="manual-mode">
+                <option value="A">Analog</option>
+                <option value="D">Digital</option>
+                <option value="TD">TDMA</option>
+                <option value="FD">FDMA</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label for="manual-description">Description</label>
+            <input type="text" id="manual-description" placeholder="Police Dispatch - Main Channel">
+          </div>
+          
+          <div class="two-columns">
+            <div class="form-group">
+              <label for="manual-tag">Category/Tag</label>
+              <input type="text" id="manual-tag" placeholder="Dispatch, Fire, EMS, Police">
+            </div>
+            <div class="form-group">
+              <label for="manual-county">County</label>
+              <input type="text" id="manual-county" placeholder="Baltimore">
+            </div>
+          </div>
+        </div>
+        
+        <div id="analog-entry-form" style="display: none;">
+          <div class="form-group">
+            <label for="manual-frequency">Frequency (MHz)</label>
+            <input type="number" id="manual-frequency" placeholder="154.250" step="0.000001" min="0">
+            <div class="help-text">Enter frequency in MHz (e.g., 154.250 for 154.250 MHz)</div>
+          </div>
+          
+          <div class="two-columns">
+            <div class="form-group">
+              <label for="analog-alpha">Alpha Tag</label>
+              <input type="text" id="analog-alpha" placeholder="Fire Dispatch" maxlength="16">
+            </div>
+            <div class="form-group">
+              <label for="analog-mode">Mode</label>
+              <select id="analog-mode">
+                <option value="FM">FM</option>
+                <option value="AM">AM</option>
+                <option value="NFM">NFM (Narrow FM)</option>
+                <option value="WFM">WFM (Wide FM)</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="form-group">
+            <label for="analog-description">Description</label>
+            <input type="text" id="analog-description" placeholder="Fire Department Dispatch">
+          </div>
+          
+          <div class="two-columns">
+            <div class="form-group">
+              <label for="analog-tag">Category/Tag</label>
+              <input type="text" id="analog-tag" placeholder="Fire, Police, EMS">
+            </div>
+            <div class="form-group">
+              <label for="analog-county">County</label>
+              <input type="text" id="analog-county" placeholder="Baltimore">
+            </div>
+          </div>
+        </div>
+        
+        <div style="margin-top: 16px;">
+          <button class="btn btn-primary" onclick="addManualTalkgroup()">Add Talkgroup/Frequency</button>
+          <button class="btn btn-secondary" onclick="clearManualForm()" style="margin-left: 8px;">Clear Form</button>
+        </div>
+        
+        <div id="manual-entry-list" style="margin-top: 24px; display: none;">
+          <h4 style="margin-bottom: 12px;">Added Entries</h4>
+          <div id="manual-entries-container" style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border); border-radius: 4px; padding: 8px; background: var(--surface);">
+            <!-- Entries will be listed here -->
+          </div>
+          <div style="margin-top: 12px;">
+            <button class="btn btn-primary" onclick="saveManualEntries()">Save All Entries</button>
+            <button class="btn btn-secondary" onclick="clearManualEntries()" style="margin-left: 8px;">Clear All</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    
     <div id="talkgroups-section" style="display: none; margin-top: 24px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <h3 id="tg-count">0 talkgroups loaded</h3>
@@ -902,11 +1163,38 @@ async function renderTalkgroupsStep() {
       if (e.target.value === 'radioreference') {
         document.getElementById('radioreference-import').style.display = 'block';
         document.getElementById('csv-upload').style.display = 'none';
-      } else {
+        document.getElementById('manual-entry').style.display = 'none';
+      } else if (e.target.value === 'csv') {
         document.getElementById('radioreference-import').style.display = 'none';
         document.getElementById('csv-upload').style.display = 'block';
+        document.getElementById('manual-entry').style.display = 'none';
+      } else if (e.target.value === 'manual') {
+        document.getElementById('radioreference-import').style.display = 'none';
+        document.getElementById('csv-upload').style.display = 'none';
+        document.getElementById('manual-entry').style.display = 'block';
       }
     });
+  });
+  
+  // Handle entry type selection (digital vs analog)
+  document.querySelectorAll('input[name="entry-type"]').forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      if (e.target.value === 'digital') {
+        document.getElementById('digital-entry-form').style.display = 'block';
+        document.getElementById('analog-entry-form').style.display = 'none';
+      } else {
+        document.getElementById('digital-entry-form').style.display = 'none';
+        document.getElementById('analog-entry-form').style.display = 'block';
+      }
+    });
+  });
+  
+  // Auto-calculate hex from decimal for digital entries
+  document.getElementById('manual-dec')?.addEventListener('input', (e) => {
+    const dec = parseInt(e.target.value);
+    if (!isNaN(dec) && dec >= 0) {
+      document.getElementById('manual-hex').value = `0x${dec.toString(16).toUpperCase()}`;
+    }
   });
   
   // Setup RadioReference CSV upload
@@ -1108,41 +1396,197 @@ window.downloadConfigs = async function() {
     showToast('Download failed: ' + error.message, 'error');
   }
 };
+
+// Manual entry functions
+let manualEntries = [];
+
+window.addManualTalkgroup = function() {
+  const entryType = document.querySelector('input[name="entry-type"]:checked')?.value;
   
-  // Setup file upload
-  const uploadArea = document.getElementById('csv-upload');
-  const fileInput = document.getElementById('csv-file-input');
-  
-  uploadArea.addEventListener('click', () => fileInput.click());
-  
-  uploadArea.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    uploadArea.classList.add('dragover');
-  });
-  
-  uploadArea.addEventListener('dragleave', () => {
-    uploadArea.classList.remove('dragover');
-  });
-  
-  uploadArea.addEventListener('drop', async (e) => {
-    e.preventDefault();
-    uploadArea.classList.remove('dragover');
-    const file = e.dataTransfer.files[0];
-    if (file) await uploadCsvFile(file);
-  });
-  
-  fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (file) await uploadCsvFile(file);
-  });
-  
-  // Check for existing talkgroups
-  const result = await api('/api/setup/talkgroups');
-  if (result.talkgroups && result.talkgroups.length > 0) {
-    talkgroups = result.talkgroups;
-    renderTalkgroupList();
+  if (entryType === 'digital') {
+    const dec = parseInt(document.getElementById('manual-dec').value);
+    if (isNaN(dec) || dec < 0) {
+      showToast('Please enter a valid talkgroup ID', 'error');
+      return;
+    }
+    
+    const entry = {
+      id: dec,
+      hex: document.getElementById('manual-hex').value || `0x${dec.toString(16).toUpperCase()}`,
+      alphaTag: document.getElementById('manual-alpha').value || '',
+      mode: document.getElementById('manual-mode').value || 'D',
+      description: document.getElementById('manual-description').value || '',
+      tag: document.getElementById('manual-tag').value || '',
+      county: document.getElementById('manual-county').value || '',
+      type: 'digital'
+    };
+    
+    // Check for duplicates
+    if (manualEntries.find(e => e.id === dec && e.type === 'digital')) {
+      showToast('This talkgroup ID already exists', 'error');
+      return;
+    }
+    
+    manualEntries.push(entry);
+  } else {
+    const frequency = parseFloat(document.getElementById('manual-frequency').value);
+    if (isNaN(frequency) || frequency <= 0) {
+      showToast('Please enter a valid frequency', 'error');
+      return;
+    }
+    
+    // For analog, use frequency as ID (multiply by 1000000 to get Hz, then use as ID)
+    const freqId = Math.round(frequency * 1000000);
+    
+    const entry = {
+      id: freqId,
+      hex: `0x${freqId.toString(16).toUpperCase()}`,
+      frequency: frequency,
+      alphaTag: document.getElementById('analog-alpha').value || '',
+      mode: document.getElementById('analog-mode').value || 'FM',
+      description: document.getElementById('analog-description').value || '',
+      tag: document.getElementById('analog-tag').value || '',
+      county: document.getElementById('analog-county').value || '',
+      type: 'analog'
+    };
+    
+    // Check for duplicates
+    if (manualEntries.find(e => e.frequency === frequency && e.type === 'analog')) {
+      showToast('This frequency already exists', 'error');
+      return;
+    }
+    
+    manualEntries.push(entry);
   }
-}
+  
+  updateManualEntriesList();
+  clearManualForm();
+  showToast('Entry added', 'success');
+};
+
+window.clearManualForm = function() {
+  const entryType = document.querySelector('input[name="entry-type"]:checked')?.value;
+  
+  if (entryType === 'digital') {
+    document.getElementById('manual-dec').value = '';
+    document.getElementById('manual-hex').value = '';
+    document.getElementById('manual-alpha').value = '';
+    document.getElementById('manual-mode').value = 'D';
+    document.getElementById('manual-description').value = '';
+    document.getElementById('manual-tag').value = '';
+    document.getElementById('manual-county').value = '';
+  } else {
+    document.getElementById('manual-frequency').value = '';
+    document.getElementById('analog-alpha').value = '';
+    document.getElementById('analog-mode').value = 'FM';
+    document.getElementById('analog-description').value = '';
+    document.getElementById('analog-tag').value = '';
+    document.getElementById('analog-county').value = '';
+  }
+};
+
+window.updateManualEntriesList = function() {
+  const container = document.getElementById('manual-entries-container');
+  const listDiv = document.getElementById('manual-entry-list');
+  
+  if (manualEntries.length === 0) {
+    listDiv.style.display = 'none';
+    return;
+  }
+  
+  listDiv.style.display = 'block';
+  
+  container.innerHTML = manualEntries.map((entry, index) => {
+    if (entry.type === 'digital') {
+      return `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid var(--border);">
+          <div>
+            <div style="font-weight: 600;">${entry.alphaTag || `TG ${entry.id}`}</div>
+            <div style="font-size: 0.85em; color: var(--text-secondary);">
+              ID: ${entry.id} (${entry.hex}) | ${entry.description || 'No description'}
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-small" onclick="removeManualEntry(${index})">Remove</button>
+        </div>
+      `;
+    } else {
+      return `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid var(--border);">
+          <div>
+            <div style="font-weight: 600;">${entry.alphaTag || `${entry.frequency} MHz`}</div>
+            <div style="font-size: 0.85em; color: var(--text-secondary);">
+              ${entry.frequency} MHz (${entry.mode}) | ${entry.description || 'No description'}
+            </div>
+          </div>
+          <button class="btn btn-secondary btn-small" onclick="removeManualEntry(${index})">Remove</button>
+        </div>
+      `;
+    }
+  }).join('');
+};
+
+window.removeManualEntry = function(index) {
+  manualEntries.splice(index, 1);
+  updateManualEntriesList();
+  showToast('Entry removed', 'success');
+};
+
+window.clearManualEntries = function() {
+  manualEntries = [];
+  updateManualEntriesList();
+  showToast('All entries cleared', 'success');
+};
+
+window.saveManualEntries = async function() {
+  if (manualEntries.length === 0) {
+    showToast('No entries to save', 'error');
+    return;
+  }
+  
+  try {
+    showToast('Saving entries...', 'info');
+    
+    // Convert to database format
+    const talkgroupsToSave = manualEntries.map(entry => ({
+      id: entry.id,
+      hex: entry.hex,
+      alphaTag: entry.alphaTag,
+      mode: entry.mode,
+      description: entry.description,
+      tag: entry.tag,
+      county: entry.county,
+      frequency: entry.frequency || null, // Store frequency for analog
+      type: entry.type
+    }));
+    
+    // Import to database
+    await api('/api/setup/import-talkgroups', 'POST', { talkgroups: talkgroupsToSave });
+    
+    // Fetch full list
+    const fullResult = await api('/api/setup/talkgroups');
+    talkgroups = fullResult.talkgroups || [];
+    
+    renderTalkgroupList();
+    
+    // Show talkgroups section and config generation
+    document.getElementById('talkgroups-section').style.display = 'block';
+    document.getElementById('config-generation').style.display = 'block';
+    
+    // Store system info for config generation (use manual entry as default)
+    window.rrSystemInfo = {
+      name: 'Manual Entry System',
+      id: null
+    };
+    
+    // Clear manual entries
+    manualEntries = [];
+    updateManualEntriesList();
+    
+    showToast(`Successfully saved ${talkgroupsToSave.length} talkgroups/frequencies`, 'success');
+  } catch (error) {
+    showToast('Error saving entries: ' + error.message, 'error');
+  }
+};
 
 async function uploadCsvFile(file) {
   const formData = new FormData();
@@ -1423,6 +1867,22 @@ async function renderGeocodingStep() {
     }
   }
   
+  // Reverse geocode map center to get nearest city
+  let nearestCity = detectedLocation?.city || '';
+  if (mapCenterLocation) {
+    try {
+      const geoResult = await api('/api/setup/reverse-geocode', 'POST', {
+        lat: mapCenterLocation.lat,
+        lng: mapCenterLocation.lng
+      });
+      if (geoResult.success && geoResult.city) {
+        nearestCity = geoResult.city;
+      }
+    } catch (error) {
+      console.error('Error reverse geocoding for city:', error);
+    }
+  }
+  
   wizardContent.innerHTML = `
     <h2><span class="step-icon">📍</span> Geocoding Settings</h2>
     <p>Configure address geocoding for mapping extracted locations.</p>
@@ -1432,7 +1892,7 @@ async function renderGeocodingStep() {
       <div style="display: flex; align-items: center; gap: 8px;">
         <span>✓</span>
         <div>
-          <div style="font-weight: 600;">Auto-selected ${autoSelectedCounties.length} counties within 50-mile radius</div>
+          <div style="font-weight: 600;">Auto-selected ${autoSelectedCounties.length} counties within 20-mile radius</div>
           <div style="font-size: 0.85em; color: var(--text-secondary); margin-top: 4px;">
             Based on map center: ${mapCenterLocation.lat.toFixed(4)}, ${mapCenterLocation.lng.toFixed(4)}
           </div>
@@ -1443,17 +1903,25 @@ async function renderGeocodingStep() {
     <div style="margin-top: 16px; padding: 12px; background: rgba(255, 193, 7, 0.1); border: 1px solid var(--warning); border-radius: 8px;">
       <div style="display: flex; align-items: center; gap: 8px;">
         <span>📡</span>
-        <span>Map center set. Select a state to auto-select counties within 50-mile radius.</span>
+        <span>Map center set. Select a state to auto-select counties within 20-mile radius.</span>
       </div>
     </div>
     ` : ''}
     
     <div class="radio-group" style="margin-top: 24px;">
       <label class="radio-item">
+        <input type="radio" name="geocoding-provider" value="nominatim" checked>
+        <div class="item-content">
+          <div class="item-title">OpenStreetMap Nominatim <span style="color: var(--success); font-size: 0.85em;">(Recommended)</span></div>
+          <div class="item-desc">Free, no API key required. Rate limit: 1 request/second. Good accuracy for most use cases.</div>
+        </div>
+      </label>
+      
+      <label class="radio-item">
         <input type="radio" name="geocoding-provider" value="locationiq">
         <div class="item-content">
           <div class="item-title">LocationIQ</div>
-          <div class="item-desc">Free tier available, good accuracy - <a href="https://locationiq.com/" target="_blank" style="color: var(--secondary);">Get API Key</a></div>
+          <div class="item-desc">Free tier available, higher rate limits - <a href="https://locationiq.com/" target="_blank" style="color: var(--secondary);">Get API Key</a></div>
         </div>
       </label>
       
@@ -1461,7 +1929,7 @@ async function renderGeocodingStep() {
         <input type="radio" name="geocoding-provider" value="google">
         <div class="item-content">
           <div class="item-title">Google Maps</div>
-          <div class="item-desc">Higher accuracy, requires billing - <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color: var(--secondary);">Get API Key</a></div>
+          <div class="item-desc">Highest accuracy, requires billing - <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color: var(--secondary);">Get API Key</a></div>
         </div>
       </label>
     </div>
@@ -1483,7 +1951,7 @@ async function renderGeocodingStep() {
     <div class="two-columns" style="margin-top: 16px;">
       <div class="form-group">
         <label for="geo-city">Default City</label>
-        <input type="text" id="geo-city" placeholder="Baltimore" value="${detectedLocation?.city || ''}">
+        <input type="text" id="geo-city" placeholder="Baltimore" value="${nearestCity}">
       </div>
       <div class="form-group">
         <label for="geo-state">State</label>
@@ -1564,6 +2032,38 @@ async function renderGeocodingStep() {
         </div>
       </div>
     </div>
+    
+    <hr class="section-divider">
+    
+    <h3>Town Names for AI</h3>
+    <p style="color: var(--text-secondary); margin-bottom: 12px; font-size: 0.9em;">
+      A list of town and city names in your coverage area helps the AI better recognize local place names when processing radio calls.
+    </p>
+    
+    <div id="towns-section" style="margin-top: 16px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <div>
+          <button class="btn btn-primary btn-small" id="fetch-towns-btn" onclick="fetchTownsList()">
+            <span id="fetch-towns-text">📥 Auto-fetch Towns</span>
+          </button>
+          <span style="margin-left: 8px; font-size: 0.85em; color: var(--text-secondary);">
+            From selected counties (within 20-mile radius)
+          </span>
+        </div>
+        <div id="towns-count" style="font-size: 0.85em; color: var(--text-secondary);">0 towns</div>
+      </div>
+      
+      <textarea 
+        id="geo-towns" 
+        rows="8" 
+        placeholder="Town names will appear here after clicking 'Auto-fetch Towns'...&#10;&#10;Or manually enter town names, one per line:&#10;Baltimore&#10;Towson&#10;Columbia&#10;..."
+        style="width: 100%; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: monospace; font-size: 0.9em; resize: vertical;"
+      ></textarea>
+      
+      <div class="help-text" style="margin-top: 8px;">
+        Enter one town/city name per line. These names help the AI recognize local places in radio transcripts.
+      </div>
+    </div>
   `;
   
   // Set detected state if available
@@ -1599,7 +2099,7 @@ async function renderGeocodingStep() {
           const autoSelectBtn = document.createElement('button');
           autoSelectBtn.type = 'button';
           autoSelectBtn.className = 'btn btn-secondary btn-small';
-          autoSelectBtn.textContent = 'Auto-select within 50 miles';
+          autoSelectBtn.textContent = 'Auto-select within 20 miles';
           autoSelectBtn.onclick = async () => {
             const stateSelect = document.getElementById('geo-state');
             if (!stateSelect || !stateSelect.value) {
@@ -1618,9 +2118,9 @@ async function renderGeocodingStep() {
                 result.counties.forEach(county => selectedCounties.add(county));
                 const counties = countiesData[stateSelect.value] || [];
                 renderCountiesList(counties);
-                showToast(`Selected ${result.counties.length} counties within 50 miles`, 'success');
+                showToast(`Selected ${result.counties.length} counties within 20 miles`, 'success');
               } else {
-                showToast('No counties found within 50 miles', 'warning');
+                showToast('No counties found within 20 miles', 'warning');
               }
             } catch (error) {
               showToast('Error selecting counties', 'error');
@@ -1642,6 +2142,88 @@ async function renderGeocodingStep() {
       renderGeocodingOptions(e.target.value);
     });
   });
+  
+  // Update towns count when textarea changes
+  const townsTextarea = document.getElementById('geo-towns');
+  if (townsTextarea) {
+    townsTextarea.addEventListener('input', () => {
+      updateTownsCount();
+    });
+  }
+  
+  // Render initial options for Nominatim (default)
+  renderGeocodingOptions('nominatim');
+  
+  // Auto-fetch towns if counties are already selected
+  if (selectedCounties.size > 0) {
+    setTimeout(() => {
+      fetchTownsList();
+    }, 500);
+  }
+}
+
+// Fetch towns list based on selected counties
+window.fetchTownsList = async function() {
+  const btn = document.getElementById('fetch-towns-btn');
+  const btnText = document.getElementById('fetch-towns-text');
+  const townsTextarea = document.getElementById('geo-towns');
+  
+  if (!townsTextarea) {
+    console.error('[Towns] Textarea not found');
+    return;
+  }
+  
+  const stateSelect = document.getElementById('geo-state');
+  if (!stateSelect || !stateSelect.value) {
+    showToast('Please select a state first', 'error');
+    return;
+  }
+  
+  if (selectedCounties.size === 0) {
+    showToast('Please select at least one county', 'error');
+    return;
+  }
+  
+  try {
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.textContent = '⏳ Fetching towns...';
+    
+    console.log('[Towns] Fetching towns for counties:', Array.from(selectedCounties), 'State:', stateSelect.value);
+    
+    // Use only the selected counties (which are already within the radius)
+    const result = await api('/api/setup/fetch-towns', 'POST', {
+      counties: Array.from(selectedCounties),
+      stateCode: stateSelect.value
+    });
+    
+    console.log('[Towns] API response:', result);
+    
+    if (result.success && result.towns && result.towns.length > 0) {
+      townsTextarea.value = result.towns.join('\n');
+      updateTownsCount();
+      showToast(`Fetched ${result.towns.length} towns from selected counties`, 'success');
+    } else {
+      console.warn('[Towns] No towns found in response:', result);
+      showToast('No towns found. You can enter them manually.', 'warning');
+    }
+  } catch (error) {
+    console.error('[Towns] Error fetching towns:', error);
+    showToast('Error fetching towns: ' + (error.message || 'Unknown error'), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    if (btnText) btnText.textContent = '📥 Auto-fetch Towns';
+  }
+};
+
+function updateTownsCount() {
+  const townsTextarea = document.getElementById('geo-towns');
+  const countEl = document.getElementById('towns-count');
+  
+  if (!townsTextarea || !countEl) return;
+  
+  const townsText = townsTextarea.value.trim();
+  const count = townsText ? townsText.split('\n').filter(t => t.trim().length > 0).length : 0;
+  countEl.textContent = `${count} town${count !== 1 ? 's' : ''}`;
 }
 
 // Store counties data
@@ -1750,7 +2332,22 @@ function updateCountiesCount() {
 function renderGeocodingOptions(provider) {
   const container = document.getElementById('geocoding-options');
   
-  if (provider === 'locationiq') {
+  if (provider === 'nominatim') {
+    container.innerHTML = `
+      <div style="padding: 16px; background: rgba(0, 255, 136, 0.1); border: 1px solid var(--success); border-radius: 8px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <span>✓</span>
+          <strong>No API key required!</strong>
+        </div>
+        <p style="color: var(--text-secondary); font-size: 0.9em; margin: 0;">
+          OpenStreetMap Nominatim is free and open-source. It has a rate limit of 1 request per second, which is suitable for most scanner applications.
+        </p>
+        <div style="margin-top: 12px; padding: 8px; background: rgba(255, 193, 7, 0.1); border-radius: 4px; font-size: 0.85em;">
+          <strong>Note:</strong> For higher volume usage, consider using LocationIQ or Google Maps with an API key.
+        </div>
+      </div>
+    `;
+  } else if (provider === 'locationiq') {
     container.innerHTML = `
       <div class="form-group">
         <label for="locationiq-key">
@@ -2204,7 +2801,9 @@ async function completeSetup() {
     
     if (result.success) {
       wizardScreen.classList.remove('active');
+      wizardScreen.style.display = 'none';
       completeScreen.classList.add('active');
+      completeScreen.style.display = 'flex';
       
       // Populate summary
       document.getElementById('setup-summary').innerHTML = `

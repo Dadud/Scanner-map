@@ -47,29 +47,40 @@ if (AI_PROVIDER.toLowerCase() === 'openai') {
 }
 // --- END VALIDATION ---
 
-// Validate required environment variables
-// Check if we have at least one geocoding API key
+// Check which geocoding providers are available
 const hasGoogleMaps = !!GOOGLE_MAPS_API_KEY;
 const hasLocationIQ = !!LOCATIONIQ_API_KEY;
+// Nominatim doesn't require an API key, so it's always available
+const hasNominatim = true;
 
-if (!hasGoogleMaps && !hasLocationIQ) {
-  console.error('ERROR: At least one geocoding API key is required (GOOGLE_MAPS_API_KEY or LOCATIONIQ_API_KEY)');
-  process.exit(1);
-}
+// Determine which provider to use
+// Priority: 1. User preference from GEOCODING_PROVIDER env var, 2. LocationIQ, 3. Google Maps, 4. Nominatim (fallback)
+let geocodingProvider = process.env.GEOCODING_PROVIDER?.toLowerCase() || null;
 
-// Determine which provider to use and validate required variables
-let geocodingProvider = null;
-
-if (hasGoogleMaps && hasLocationIQ) {
-  // Both available - prefer LocationIQ for consistency with existing setup
-  geocodingProvider = 'locationiq';
-  console.log('[Geocoding] Both Google Maps and LocationIQ available, using LocationIQ');
-} else if (hasLocationIQ) {
-  geocodingProvider = 'locationiq';
-  console.log('[Geocoding] Using LocationIQ for geocoding');
-} else if (hasGoogleMaps) {
-  geocodingProvider = 'google';
-  console.log('[Geocoding] Using Google Maps for geocoding');
+if (!geocodingProvider || !['locationiq', 'google', 'nominatim'].includes(geocodingProvider)) {
+  // Auto-detect based on available API keys
+  if (hasLocationIQ) {
+    geocodingProvider = 'locationiq';
+    console.log('[Geocoding] Using LocationIQ for geocoding');
+  } else if (hasGoogleMaps) {
+    geocodingProvider = 'google';
+    console.log('[Geocoding] Using Google Maps for geocoding');
+  } else {
+    geocodingProvider = 'nominatim';
+    console.log('[Geocoding] No API keys found, using OpenStreetMap Nominatim (free, no API key required)');
+    console.log('[Geocoding] Note: Nominatim has a rate limit of 1 request per second');
+  }
+} else {
+  // Validate that the selected provider has the required API key (if needed)
+  if (geocodingProvider === 'locationiq' && !hasLocationIQ) {
+    console.warn('[Geocoding] LocationIQ selected but no API key found, falling back to Nominatim');
+    geocodingProvider = 'nominatim';
+  } else if (geocodingProvider === 'google' && !hasGoogleMaps) {
+    console.warn('[Geocoding] Google Maps selected but no API key found, falling back to Nominatim');
+    geocodingProvider = 'nominatim';
+  } else {
+    console.log(`[Geocoding] Using ${geocodingProvider} for geocoding`);
+  }
 }
 
 // Validate required environment variables based on provider
@@ -344,8 +355,10 @@ async function geocodeAddress(address) {
     return await geocodeAddressWithLocationIQ(address);
   } else if (geocodingProvider === 'google') {
     return await geocodeAddressWithGoogleMaps(address);
+  } else if (geocodingProvider === 'nominatim') {
+    return await geocodeAddressWithNominatim(address);
   } else {
-    logger.error('No geocoding API key available');
+    logger.error('No geocoding provider available');
     return null;
   }
 }
@@ -526,6 +539,129 @@ async function geocodeAddressWithGoogleMaps(address) {
   }
 }
 
+// Rate limiting for Nominatim (1 request per second)
+let lastNominatimRequest = 0;
+const NOMINATIM_MIN_INTERVAL = 1100; // 1.1 seconds to be safe
+
+async function geocodeAddressWithNominatim(address) {
+  // Rate limiting: Nominatim allows 1 request per second
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastNominatimRequest;
+  if (timeSinceLastRequest < NOMINATIM_MIN_INTERVAL) {
+    await new Promise(resolve => setTimeout(resolve, NOMINATIM_MIN_INTERVAL - timeSinceLastRequest));
+  }
+  lastNominatimRequest = Date.now();
+
+  // Build address query with location bias
+  let query = address;
+  if (process.env.GEOCODING_CITY && process.env.GEOCODING_STATE) {
+    query = `${address}, ${process.env.GEOCODING_CITY}, ${process.env.GEOCODING_STATE}, ${process.env.GEOCODING_COUNTRY || 'USA'}`;
+  }
+
+  const endpoint = 'https://nominatim.openstreetmap.org/search';
+  const params = new URLSearchParams({
+    q: query,
+    format: 'json',
+    addressdetails: '1',
+    limit: '5',
+    countrycodes: process.env.GEOCODING_COUNTRY?.toLowerCase() || 'us',
+    'accept-language': 'en'
+  });
+
+  try {
+    const response = await fetch(`${endpoint}?${params.toString()}`, {
+      headers: {
+        'User-Agent': 'Scanner-Map/1.0 (contact@example.com)' // Nominatim requires a User-Agent
+      },
+      timeout: 10000
+    });
+
+    if (!response.ok) {
+      logger.error(`Nominatim API error: ${response.status} ${response.statusText}`);
+      return null;
+    }
+
+    const data = await response.json();
+
+    if (!data || data.length === 0) {
+      logger.warn(`Nominatim returned no results for address: "${address}"`);
+      return null;
+    }
+
+    // Filter results by target counties
+    const targetCounties = TARGET_COUNTIES.map(c => c.toLowerCase());
+    let bestResult = null;
+    let bestScore = 0;
+
+    for (const result of data) {
+      const addressParts = result.address || {};
+      const county = (addressParts.county || '').toLowerCase();
+      const state = (addressParts.state || '').toLowerCase();
+      const stateCode = (addressParts.state_code || '').toLowerCase();
+      
+      // Check if result is in target counties
+      const isInTargetCounty = targetCounties.some(tc => 
+        county.includes(tc) || tc.includes(county)
+      );
+      
+      // Check if result is in target state
+      const isInTargetState = stateCode === (process.env.GEOCODING_STATE || '').toLowerCase() ||
+                             state.includes((process.env.GEOCODING_STATE || '').toLowerCase());
+
+      if (isInTargetCounty && isInTargetState) {
+        // Prefer more specific results (street addresses over cities)
+        const importance = result.importance || 0;
+        const type = result.type || '';
+        let score = importance;
+        
+        // Boost score for street-level results
+        if (type === 'house' || type === 'building' || addressParts.road) {
+          score += 0.5;
+        }
+        
+        if (score > bestScore) {
+          bestScore = score;
+          bestResult = result;
+        }
+      }
+    }
+
+    // If no county match, use the first result if it's in the target state
+    if (!bestResult && data.length > 0) {
+      const firstResult = data[0];
+      const addressParts = firstResult.address || {};
+      const stateCode = (addressParts.state_code || '').toLowerCase();
+      const isInTargetState = stateCode === (process.env.GEOCODING_STATE || '').toLowerCase();
+      
+      if (isInTargetState) {
+        bestResult = firstResult;
+      }
+    }
+
+    if (!bestResult) {
+      logger.warn(`No matching results in target counties for address: "${address}"`);
+      return null;
+    }
+
+    const { lat, lon } = bestResult;
+    const addressParts = bestResult.address || {};
+    const formatted_address = bestResult.display_name || 
+      `${addressParts.road || ''} ${addressParts.house_number || ''}, ${addressParts.city || addressParts.town || ''}, ${addressParts.state || ''} ${addressParts.postcode || ''}`.trim();
+    const county = addressParts.county || '';
+
+    logger.info(`Geocoded Address: "${address}" with coordinates (${lat}, ${lon}) in ${county || 'unknown county'}`);
+
+    return {
+      lat: parseFloat(lat),
+      lng: parseFloat(lon),
+      formatted_address: formatted_address.trim(),
+      county: county
+    };
+  } catch (error) {
+    logger.error(`Error geocoding with Nominatim: ${error.message}`, { stack: error.stack });
+    return null;
+  }
+}
 
 /**
  * Hyperlinks an address within the transcript text using coordinates.

@@ -45,11 +45,13 @@ function loadConfigIfNeeded() {
           'ICAD_API_KEY': cfg.transcription?.icadApiKey || '',
           'ICAD_PROFILE': cfg.transcription?.icadProfile || 'tiny',
           'LOCATIONIQ_API_KEY': cfg.geocoding?.locationiqKey || '',
+          'GEOCODING_PROVIDER': cfg.geocoding?.provider || 'nominatim',
           'GOOGLE_MAPS_API_KEY': cfg.geocoding?.googleMapsKey || '',
           'GEOCODING_CITY': cfg.geocoding?.city || '',
           'GEOCODING_STATE': cfg.geocoding?.state || '',
           'GEOCODING_COUNTRY': cfg.geocoding?.country || 'US',
           'GEOCODING_TARGET_COUNTIES': (cfg.geocoding?.counties || []).join(','),
+          'TARGET_CITIES_LIST': (cfg.geocoding?.towns || []).join(','),
           'AI_PROVIDER': cfg.ai?.provider || 'ollama',
           'OLLAMA_URL': cfg.ai?.ollamaUrl || 'http://localhost:11434',
           'OLLAMA_MODEL': cfg.ai?.ollamaModel || 'llama3.1:8b',
@@ -1100,7 +1102,9 @@ function initializeDatabase() {
         mode TEXT,
         description TEXT,
         tag TEXT,
-        county TEXT
+        county TEXT,
+        frequency REAL,
+        type TEXT
       )`, (err) => tableCreated(err, 'talk_groups'));
 
       db.run(`CREATE TABLE IF NOT EXISTS frequencies (

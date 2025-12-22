@@ -210,23 +210,49 @@ function generateSDRTrunkConfig(talkgroups, systemName = 'Imported System', syst
 /**
  * Generate TrunkRecorder configuration
  * TrunkRecorder uses JSON format for systems
+ * Supports both digital talkgroups and analog frequencies
  */
 function generateTrunkRecorderConfig(talkgroups, systemName = 'Imported System', systemId = null) {
+  // Separate digital and analog entries
+  const digitalTalkgroups = talkgroups.filter(tg => !tg.frequency || tg.type === 'digital');
+  const analogFrequencies = talkgroups.filter(tg => tg.frequency && tg.type === 'analog');
+  
   const config = {
-    systems: [
-      {
-        id: systemId || 'default',
-        name: systemName,
-        talkgroups: talkgroups.map(tg => ({
-          id: tg.id,
-          label: tg.alphaTag || tg.description || `TG ${tg.id}`,
-          name: tg.description || tg.alphaTag || '',
-          tag: tg.tag || '',
-          group: tg.county || 'Default'
-        }))
-      }
-    ]
+    systems: []
   };
+  
+  // Add digital system if we have digital talkgroups
+  if (digitalTalkgroups.length > 0) {
+    config.systems.push({
+      id: systemId || 'default',
+      name: systemName,
+      type: 'trunked',
+      talkgroups: digitalTalkgroups.map(tg => ({
+        id: tg.id,
+        label: tg.alphaTag || tg.description || `TG ${tg.id}`,
+        name: tg.description || tg.alphaTag || '',
+        tag: tg.tag || '',
+        group: tg.county || 'Default'
+      }))
+    });
+  }
+  
+  // Add analog system if we have analog frequencies
+  if (analogFrequencies.length > 0) {
+    config.systems.push({
+      id: (systemId || 'default') + '-analog',
+      name: systemName + ' (Analog)',
+      type: 'analog',
+      frequencies: analogFrequencies.map(tg => ({
+        frequency: tg.frequency,
+        label: tg.alphaTag || `${tg.frequency} MHz`,
+        name: tg.description || tg.alphaTag || '',
+        mode: tg.mode || 'FM',
+        tag: tg.tag || '',
+        group: tg.county || 'Default'
+      }))
+    });
+  }
   
   return JSON.stringify(config, null, 2);
 }

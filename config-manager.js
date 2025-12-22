@@ -49,13 +49,14 @@ const DEFAULT_CONFIG = {
   },
   geocoding: {
     enabled: true,
-    provider: 'locationiq', // locationiq, google
+    provider: 'nominatim', // nominatim, locationiq, google (nominatim is free, no API key required)
     locationiqKey: null,
     googleMapsKey: null,
     city: '',
     state: '',
     country: 'US',
-    counties: []
+    counties: [],
+    towns: [] // List of town/city names for AI context
   },
   ai: {
     enabled: true,
@@ -327,9 +328,9 @@ class ConfigManager {
 
     // Check required fields based on enabled features
     if (this.config.setupComplete) {
-      // Admin password required
-      if (!this.config.admin.passwordHash) {
-        errors.push('Admin password is required');
+      // Admin password only required if authentication is enabled
+      if (this.config.admin.authEnabled && !this.config.admin.passwordHash) {
+        errors.push('Admin password is required when authentication is enabled');
       }
 
       // Transcription validation

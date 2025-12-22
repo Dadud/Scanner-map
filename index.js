@@ -77,12 +77,14 @@ function loadConfigToEnv() {
     'ICAD_PROFILE': config.transcription.icadProfile || 'tiny',
     
     // Geocoding
+    'GEOCODING_PROVIDER': config.geocoding.provider || 'nominatim',
     'LOCATIONIQ_API_KEY': config.geocoding.locationiqKey || '',
     'GOOGLE_MAPS_API_KEY': config.geocoding.googleMapsKey || '',
     'GEOCODING_CITY': config.geocoding.city || '',
     'GEOCODING_STATE': config.geocoding.state || '',
     'GEOCODING_COUNTRY': config.geocoding.country || 'US',
     'GEOCODING_TARGET_COUNTIES': (config.geocoding.counties || []).join(','),
+    'TARGET_CITIES_LIST': (config.geocoding.towns || []).join(','),
     
     // AI
     'AI_PROVIDER': config.ai.provider || 'ollama',
@@ -207,7 +209,13 @@ async function startNormalMode() {
 async function main() {
   try {
     // Check if setup is needed
-    if (isSetupNeeded()) {
+    const needsSetup = isSetupNeeded();
+    
+    if (needsSetup) {
+      console.log('[Startup] Setup wizard required');
+      console.log('[Startup] Starting setup server...');
+      console.log('');
+      
       // Check if we should offer to migrate from .env
       if (hasExistingEnv()) {
         console.log('[Startup] Found existing .env file');
@@ -217,10 +225,17 @@ async function main() {
       
       await startSetupMode();
     } else {
+      console.log('[Startup] Setup already complete');
+      console.log('[Startup] Starting in normal mode...');
+      console.log('');
       await startNormalMode();
     }
   } catch (error) {
     console.error('[Startup] Fatal error:', error.message);
+    console.error('');
+    console.error('If setup is stuck, you can reset by deleting:');
+    console.error('  data/config.json');
+    console.error('');
     process.exit(1);
   }
 }

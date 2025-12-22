@@ -265,6 +265,190 @@ async function detectRemoteTranscription(baseUrl) {
 }
 
 /**
+ * Reverse geocode coordinates to find nearest city
+ */
+async function reverseGeocode(lat, lng, apiKey = null) {
+  try {
+    // Try using OpenStreetMap Nominatim (free, no API key needed)
+    // This is a free service but has rate limits - use sparingly
+    if (!apiKey) {
+      const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`, {
+        timeout: 5000,
+        headers: {
+          'User-Agent': 'Scanner-Map-Setup/1.0'
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.address) {
+          return {
+            success: true,
+            city: data.address.city || data.address.town || data.address.village || data.address.municipality || data.address.county || '',
+            state: data.address.state || data.address.region || '',
+            country: data.address.country_code?.toUpperCase() || 'US',
+            fullAddress: data.display_name || ''
+          };
+        }
+      }
+    } else {
+      // Use provided API key (LocationIQ)
+      try {
+        const response = await fetch(`https://us1.locationiq.com/v1/reverse.php?key=${apiKey}&lat=${lat}&lon=${lng}&format=json&addressdetails=1`, {
+          timeout: 5000
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.address) {
+            return {
+              success: true,
+              city: data.address.city || data.address.town || data.address.village || data.address.municipality || '',
+              state: data.address.state || data.address.region || '',
+              country: data.address.country_code?.toUpperCase() || 'US',
+              fullAddress: data.display_name || ''
+            };
+          }
+        }
+      } catch (e) {
+        console.error('[Detection] LocationIQ reverse geocoding error:', e.message);
+      }
+    }
+  } catch (error) {
+    console.error('[Detection] Reverse geocoding error:', error.message);
+  }
+  
+  return { success: false, error: 'Could not reverse geocode location' };
+}
+
+/**
+ * Fetch towns/cities within selected counties
+ */
+async function fetchTownsInCounties(counties, stateCode, apiKey = null) {
+  const towns = new Set(); // Use Set to avoid duplicates
+  
+  try {
+    // Use OpenStreetMap Nominatim to search for cities/towns in each county
+    // Limit to first 10 counties to avoid rate limits
+    console.log(`[Detection] Fetching towns for ${counties.length} counties in ${stateCode}`);
+    
+    for (const county of counties.slice(0, 10)) {
+      try {
+        // Search for cities/towns in this county - try multiple query formats
+        const queries = [
+          `${county} County, ${stateCode}, USA`,
+          `cities in ${county} County, ${stateCode}`,
+          `towns in ${county} County, ${stateCode}`
+        ];
+        
+        for (const query of queries) {
+          try {
+            // Use AbortController for timeout (more reliable than timeout option)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
+            
+            const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=50&addressdetails=1&extratags=1`, {
+              signal: controller.signal,
+              headers: {
+                'User-Agent': 'Scanner-Map-Setup/1.0'
+              }
+            });
+            
+            clearTimeout(timeoutId);
+            
+            if (response.ok) {
+              const data = await response.json();
+              
+              // Extract city/town names from results
+              for (const place of data) {
+                const address = place.address || {};
+                // Try multiple address fields for city/town name
+                const city = address.city || address.town || address.village || address.municipality || address.hamlet || address.locality;
+                const placeType = place.type || '';
+                const placeClass = place.class || '';
+                
+                // Only include actual cities/towns, not counties or states
+                if (city && 
+                    !city.toLowerCase().includes('county') &&
+                    !city.toLowerCase().includes('state') &&
+                    city.length > 1 &&
+                    city !== county) { // Don't include the county name itself
+                  // Check if it's a populated place
+                  if (placeClass === 'place' || 
+                      placeType === 'city' || 
+                      placeType === 'town' || 
+                      placeType === 'village' || 
+                      placeType === 'municipality' ||
+                      placeType === 'hamlet' ||
+                      placeType === 'locality') {
+                    towns.add(city);
+                  }
+                }
+              }
+            } else {
+              console.warn(`[Detection] Nominatim returned status ${response.status} for query: ${query}`);
+            }
+            
+            // Small delay to respect rate limits (Nominatim requires 1 request per second)
+            await new Promise(resolve => setTimeout(resolve, 1100));
+          } catch (queryError) {
+            if (queryError.name === 'AbortError') {
+              console.warn(`[Detection] Query "${query}" timed out`);
+            } else {
+              console.error(`[Detection] Error with query "${query}":`, queryError.message);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`[Detection] Error fetching towns for ${county}:`, error.message);
+      }
+    }
+    
+    // If we have an API key, we can optionally enhance results with LocationIQ
+    // But primary method is using counties, so this is optional
+    if (apiKey && counties.length > 0) {
+      // For each county, try to get additional towns using LocationIQ
+      for (const county of counties.slice(0, 5)) { // Limit to avoid too many API calls
+        try {
+          const query = `${county} County, ${stateCode}, USA`;
+          const response = await fetch(`https://us1.locationiq.com/v1/search.php?key=${apiKey}&q=${encodeURIComponent(query)}&format=json&tag=place:city,place:town,place:village&limit=20`, {
+            timeout: 5000
+          });
+          
+          if (response.ok) {
+            const data = await response.json();
+            if (Array.isArray(data)) {
+              for (const place of data) {
+                if (place.name && place.name.length > 1 && !place.name.toLowerCase().includes('county')) {
+                  towns.add(place.name);
+                }
+              }
+            }
+          }
+          
+          // Small delay to respect rate limits
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (error) {
+          // Silently fail - this is optional enhancement
+        }
+      }
+    }
+    
+    // Convert Set to sorted array (case-insensitive sort)
+    const townsArray = Array.from(towns).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+    
+    return {
+      success: true,
+      towns: townsArray,
+      count: townsArray.length
+    };
+  } catch (error) {
+    console.error('[Detection] Error fetching towns:', error.message);
+    return { success: false, error: error.message, towns: [] };
+  }
+}
+
+/**
  * Recommend transcription model based on hardware
  */
 function recommendTranscriptionModel(systemInfo, gpuInfo) {
@@ -313,6 +497,8 @@ module.exports = {
   detectOllama,
   detectRemoteTranscription,
   recommendTranscriptionModel,
-  extractStateCode
+  extractStateCode,
+  reverseGeocode,
+  fetchTownsInCounties
 };
 
