@@ -458,6 +458,11 @@ class ConfigManager {
     lines.push(`TRANSCRIPTION_DEVICE=${this.config.transcription.device}`);
     lines.push(`WHISPER_MODEL=${this.config.transcription.whisperModel}`);
     
+    // Enable auto-installation of Python packages for local transcription
+    if (this.config.transcription.mode === 'local') {
+      lines.push(`AUTO_UPDATE_PYTHON_PACKAGES=true`);
+    }
+    
     if (this.config.transcription.mode === 'openai' && this.config.transcription.openaiKey) {
       lines.push(`OPENAI_API_KEY=${this.config.transcription.openaiKey}`);
     }

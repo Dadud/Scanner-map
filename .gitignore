@@ -40,6 +40,10 @@ __pycache__/
 *.pyc
 .cache/
 
+# Whisper models and temporary download scripts
+models/
+download_model_temp.py
+
 # Build
 dist/
 build/

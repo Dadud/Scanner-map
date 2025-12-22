@@ -2088,6 +2088,113 @@ async function startTranscriptionProcess() {
       });
     };
     
+    // Function to download Whisper model
+    const downloadWhisperModel = (pythonCmd, modelName, device) => {
+      return new Promise((resolve, reject) => {
+        logger.info(`📥 Downloading Whisper model: ${modelName} (this may take several minutes)...`);
+        logger.info(`⏳ Model size varies: tiny (~75MB), base (~150MB), small (~500MB), medium (~1.5GB), large-v3 (~3GB)`);
+        
+        // Create a Python script to download the model
+        const downloadScript = `
+import sys
+import os
+import torch
+from faster_whisper import WhisperModel
+
+try:
+    device = "${device}"
+    model_name = "${modelName}"
+    
+    # Determine compute type based on device
+    if device == "cuda" and torch.cuda.is_available():
+        compute_type = "float16"
+    elif device == "mps":
+        compute_type = "float32"
+    else:
+        compute_type = "int8"
+    
+    print(f"Downloading model: {model_name} for device: {device}", file=sys.stderr)
+    print(f"Using compute type: {compute_type}", file=sys.stderr)
+    
+    # This will automatically download the model if not cached
+    model = WhisperModel(
+        model_name,
+        device=device,
+        compute_type=compute_type,
+        download_root="./models"
+    )
+    
+    print("✓ Model downloaded successfully", file=sys.stderr)
+    sys.exit(0)
+except Exception as e:
+    print(f"ERROR: Failed to download model: {e}", file=sys.stderr)
+    sys.exit(1)
+`;
+        
+        // Write script to temp file
+        const scriptPath = path.join(__dirname, 'download_model_temp.py');
+        fs.writeFileSync(scriptPath, downloadScript);
+        
+        const downloadProcess = spawn(pythonCmd, [scriptPath], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          cwd: __dirname
+        });
+        
+        let output = '';
+        let errorOutput = '';
+        
+        downloadProcess.stdout.on('data', (data) => {
+          const text = data.toString();
+          output += text;
+          // Show download progress
+          if (text.includes('Downloading') || text.includes('downloading') || text.includes('%')) {
+            logger.info(`Model download: ${text.trim()}`);
+          }
+        });
+        
+        downloadProcess.stderr.on('data', (data) => {
+          const text = data.toString();
+          errorOutput += text;
+          // Show important messages
+          if (text.includes('Downloading') || text.includes('downloading') || 
+              text.includes('Downloaded') || text.includes('✓') || 
+              text.includes('ERROR') || text.includes('Failed')) {
+            logger.info(`Model download: ${text.trim()}`);
+          }
+        });
+        
+        downloadProcess.on('close', (code) => {
+          // Clean up temp script
+          try {
+            if (fs.existsSync(scriptPath)) {
+              fs.unlinkSync(scriptPath);
+            }
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+          
+          if (code === 0) {
+            logger.info(`✅ Successfully downloaded Whisper model: ${modelName}`);
+            resolve();
+          } else {
+            reject(new Error(`Model download failed with code ${code}: ${errorOutput.slice(0, 200)}`));
+          }
+        });
+        
+        downloadProcess.on('error', (err) => {
+          // Clean up temp script
+          try {
+            if (fs.existsSync(scriptPath)) {
+              fs.unlinkSync(scriptPath);
+            }
+          } catch (e) {
+            // Ignore cleanup errors
+          }
+          reject(err);
+        });
+      });
+    };
+    
     // Function to auto-install Python packages
     const autoInstallPythonPackages = (cmd) => {
       return new Promise((resolve) => {
@@ -2125,7 +2232,19 @@ async function startTranscriptionProcess() {
             testPythonPackages(cmd).then(hasPackages => {
               if (hasPackages) {
                 logger.info(`✓ Successfully installed all required packages for ${cmd}`);
-                resolve(true);
+                
+                // Download the Whisper model if configured
+                if (WHISPER_MODEL && effectiveTranscriptionMode === 'local') {
+                  downloadWhisperModel(cmd, WHISPER_MODEL, TRANSCRIPTION_DEVICE).then(() => {
+                    resolve(true);
+                  }).catch((err) => {
+                    logger.warn(`Model download failed, but continuing: ${err.message}`);
+                    logger.info('Model will be downloaded automatically on first use');
+                    resolve(true); // Continue even if model download fails
+                  });
+                } else {
+                  resolve(true);
+                }
               } else if (!usingFallback) {
                 // Try fallback to CPU-only PyTorch
                 logger.warn('CUDA PyTorch installation may have failed, trying CPU version...');
@@ -2274,6 +2393,16 @@ async function startTranscriptionProcess() {
             logger.info('✅ Package update check completed');
           } else {
             logger.info('Auto-update disabled, skipping package updates');
+          }
+          
+          // Download the Whisper model if configured
+          if (WHISPER_MODEL && effectiveTranscriptionMode === 'local') {
+            try {
+              await downloadWhisperModel(result.cmd, WHISPER_MODEL, TRANSCRIPTION_DEVICE || 'cpu');
+            } catch (err) {
+              logger.warn(`Model download failed, but continuing: ${err.message}`);
+              logger.info('Model will be downloaded automatically on first use');
+            }
           }
           
           foundValidPython = true;
@@ -2452,10 +2581,16 @@ async function startTranscriptionProcess() {
     }
   });
 
+  // Collect stderr output for better error diagnostics
+  let stderrBuffer = '';
+  
   // Handle stderr with selective logging - only show important messages
   transcriptionProcess.stderr.on('data', (data) => {
     const errorMsg = data.toString().trim();
     if (errorMsg) {
+       // Always buffer stderr for error reporting
+       stderrBuffer += errorMsg + '\n';
+       
        // Only log important messages, not routine processing info
        const isImportant = errorMsg.includes('ERROR') || 
                           errorMsg.includes('FATAL') || 
@@ -2471,7 +2606,9 @@ async function startTranscriptionProcess() {
                           errorMsg.includes('Environment validation') ||
                           errorMsg.includes('available') ||
                           errorMsg.includes('Loaded model') ||
-                          errorMsg.includes('Using device');
+                          errorMsg.includes('Using device') ||
+                          errorMsg.includes('not installed') ||
+                          errorMsg.includes('missing');
        
        if (isImportant) {
          logger.warn(`Local transcription process: ${errorMsg}`);
@@ -2480,12 +2617,16 @@ async function startTranscriptionProcess() {
        // Check for specific Python errors that indicate critical issues
        if (errorMsg.includes('ModuleNotFoundError') || errorMsg.includes('ImportError')) {
          logger.error('PYTHON IMPORT ERROR DETECTED - Missing required Python packages!');
+         logger.error('The auto-installer should install these automatically. If this persists, run:');
+         logger.error(`  ${pythonCommand} -m pip install faster-whisper pydub python-dotenv torch`);
        } else if (errorMsg.includes('CUDA') && errorMsg.includes('error')) {
          logger.error('CUDA ERROR DETECTED - GPU may not be available or drivers are outdated!');
        } else if (errorMsg.includes('torch') && errorMsg.includes('error')) {
          logger.error('PYTORCH ERROR DETECTED - Check PyTorch installation!');
        } else if (errorMsg.includes('faster_whisper') && errorMsg.includes('error')) {
          logger.error('FASTER-WHISPER ERROR DETECTED - Check faster-whisper installation!');
+       } else if (errorMsg.includes('FATAL ERROR') || errorMsg.includes('FATAL:')) {
+         logger.error(`CRITICAL ERROR: ${errorMsg}`);
        }
     }
   });
@@ -2494,17 +2635,38 @@ async function startTranscriptionProcess() {
   transcriptionProcess.on('close', (code, signal) => {
     logger.error(`Local transcription process exited with code ${code}, signal: ${signal}`);
     
+    // Log collected stderr output if process failed
+    if (code !== 0 && stderrBuffer) {
+      logger.error('=== Python Process Error Output ===');
+      logger.error(stderrBuffer.trim());
+      logger.error('=== End Error Output ===');
+    }
+    
     // More specific error handling based on exit conditions
     if (code === null && signal) {
       logger.error(`Python process was killed by signal: ${signal}`);
     } else if (code === 1) {
       logger.error('Python process exited with error code 1 - likely a Python runtime error');
+      if (stderrBuffer) {
+        // Check for common issues
+        if (stderrBuffer.includes('ModuleNotFoundError') || stderrBuffer.includes('ImportError')) {
+          logger.error('SOLUTION: Missing Python packages detected.');
+          logger.error(`Run this command to install: ${pythonCommand} -m pip install faster-whisper pydub python-dotenv torch`);
+          logger.error('Or set AUTO_UPDATE_PYTHON_PACKAGES=true in .env to enable auto-installation');
+        } else if (stderrBuffer.includes('FATAL ERROR: Missing required environment variables')) {
+          logger.error('SOLUTION: Missing environment variables. Check your .env file for:');
+          logger.error('  - WHISPER_MODEL');
+          logger.error('  - TRANSCRIPTION_DEVICE');
+        }
+      }
     } else if (code === null) {
       logger.error('Python process exited unexpectedly (code null) - likely crashed during startup');
       logger.error('This usually indicates missing dependencies or environment issues');
       logger.error('Check that Python, faster-whisper, torch, and other dependencies are properly installed');
     }
     
+    // Clear stderr buffer for next attempt
+    stderrBuffer = '';
     cleanupTranscriptionProcess();
 
     // Only restart if not too many recent failures

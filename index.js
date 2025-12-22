@@ -76,6 +76,8 @@ function loadConfigToEnv() {
     'ICAD_URL': config.transcription.icadUrl || '',
     'ICAD_API_KEY': config.transcription.icadApiKey || '',
     'ICAD_PROFILE': config.transcription.icadProfile || 'tiny',
+    // Auto-install Python packages for local transcription
+    'AUTO_UPDATE_PYTHON_PACKAGES': config.transcription.mode === 'local' ? 'true' : 'false',
     
     // Geocoding
     'GEOCODING_PROVIDER': config.geocoding.provider || 'nominatim',

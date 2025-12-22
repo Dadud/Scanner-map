@@ -892,7 +892,7 @@ function renderMapStep() {
     
     <div class="map-container" id="setup-map"></div>
     <div id="map-radius-info" style="display: none; margin-top: 8px;"></div>
-    <p class="map-hint">Click on the map to set the center point. Counties within a 20-mile radius will be auto-selected in the Geocoding step.</p>
+    <p class="map-hint">Click on the map to set the center point.</p>
     
     <div class="two-columns" style="margin-top: 16px;">
       <div class="form-group">
@@ -954,8 +954,6 @@ function renderMapStep() {
       // Reverse geocode to find nearest city
       await updateCityFromCoordinates(e.latlng.lat, e.latlng.lng);
       
-      // Auto-detect counties if on geocoding step
-      await autoDetectCountiesFromMapLocation(e.latlng.lat, e.latlng.lng);
     });
     
     // Handle marker drag
@@ -973,8 +971,6 @@ function renderMapStep() {
       // Reverse geocode to find nearest city
       await updateCityFromCoordinates(pos.lat, pos.lng);
       
-      // Auto-detect counties if on geocoding step
-      await autoDetectCountiesFromMapLocation(pos.lat, pos.lng);
     });
     
     // Handle coordinate input
@@ -986,7 +982,6 @@ function renderMapStep() {
         mapCenterLocation = { lat, lng };
         showMapRadiusInfo(lat, lng);
         await updateCityFromCoordinates(lat, lng);
-        await autoDetectCountiesFromMapLocation(lat, lng);
       }
     });
     document.getElementById('map-lng').addEventListener('change', async () => {
@@ -997,7 +992,6 @@ function renderMapStep() {
         mapCenterLocation = { lat, lng };
         showMapRadiusInfo(lat, lng);
         await updateCityFromCoordinates(lat, lng);
-        await autoDetectCountiesFromMapLocation(lat, lng);
       }
     });
     
@@ -1110,7 +1104,7 @@ function showMapRadiusInfo(lat, lng) {
     infoDiv.innerHTML = `
       <div style="display: flex; align-items: center; gap: 8px; padding: 8px; background: rgba(0, 255, 136, 0.1); border-radius: 4px;">
         <span>📡</span>
-        <span>20-mile radio range selected. Counties within this radius will be auto-selected in the Geocoding step.</span>
+        <span>20-mile radio range selected.</span>
       </div>
     `;
   }
@@ -2137,34 +2131,9 @@ async function renderGeocodingStep() {
     }
   }
   
-  // Auto-select counties will happen asynchronously after UI renders (non-blocking)
-  let autoSelectedCounties = [];
-  let autoSelectedState = null;
-  
   wizardContent.innerHTML = `
     <h2><span class="step-icon">📍</span> Geocoding Settings</h2>
     <p>Configure address geocoding for mapping extracted locations.</p>
-    
-    ${mapCenterLocation && detectedLocation?.stateCode ? `
-    <div data-county-info style="margin-top: 16px; padding: 12px; background: rgba(0, 170, 255, 0.1); border: 1px solid var(--secondary); border-radius: 8px;">
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <span>⏳</span>
-        <div>
-          <div style="font-weight: 600;">Finding counties within 20-mile radius...</div>
-          <div style="font-size: 0.85em; color: var(--text-secondary); margin-top: 4px;">
-            Based on map center: ${mapCenterLocation.lat.toFixed(4)}, ${mapCenterLocation.lng.toFixed(4)}
-          </div>
-        </div>
-      </div>
-    </div>
-    ` : mapCenterLocation ? `
-    <div style="margin-top: 16px; padding: 12px; background: rgba(255, 193, 7, 0.1); border: 1px solid var(--warning); border-radius: 8px;">
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <span>📡</span>
-        <span>Map center set. Select a state to auto-select counties within 20-mile radius.</span>
-      </div>
-    </div>
-    ` : ''}
     
     <div class="radio-group" style="margin-top: 24px;">
       <label class="radio-item">
@@ -2286,9 +2255,6 @@ async function renderGeocodingStep() {
             <span><strong id="counties-count">0</strong> counties selected</span>
             <button type="button" class="btn btn-secondary btn-small" onclick="selectAllCounties()">Select All</button>
             <button type="button" class="btn btn-secondary btn-small" onclick="clearCounties()">Clear</button>
-            ${mapCenterLocation ? `<button type="button" class="btn btn-primary btn-small" onclick="autoDetectCountiesFromMap()" id="auto-detect-counties-btn">
-              <span id="auto-detect-counties-text">📍 Auto-detect from map</span>
-            </button>` : ''}
           </div>
         </div>
       </div>
@@ -2308,7 +2274,7 @@ async function renderGeocodingStep() {
             <span id="fetch-towns-text">📥 Auto-fetch Towns</span>
           </button>
           <span style="margin-left: 8px; font-size: 0.85em; color: var(--text-secondary);">
-            From selected counties (within 20-mile radius)
+            From selected counties
           </span>
         </div>
         <div id="towns-count" style="font-size: 0.85em; color: var(--text-secondary);">0 towns</div>
@@ -2338,16 +2304,6 @@ async function renderGeocodingStep() {
     }, 100);
   }
   
-  // Auto-select counties asynchronously after state is loaded (non-blocking)
-  if (mapCenterLocation && detectedLocation?.stateCode) {
-    // Wait for counties to load, then auto-detect
-    setTimeout(async () => {
-      const stateSelect = document.getElementById('geo-state');
-      if (stateSelect && stateSelect.value === detectedLocation.stateCode && countiesData[detectedLocation.stateCode]?.length > 0) {
-        await autoDetectCountiesFromMapLocation(mapCenterLocation.lat, mapCenterLocation.lng);
-      }
-    }, 500);
-  }
   
   
   // Handle state change
@@ -2479,10 +2435,6 @@ async function loadCountiesForState(stateCode) {
         }
       }
       
-      // Auto-detect counties from map location if available
-      if (mapCenterLocation && currentStep === steps.findIndex(s => s.id === 'geocoding')) {
-        await autoDetectCountiesFromMapLocation(mapCenterLocation.lat, mapCenterLocation.lng);
-      }
     } else {
       container.innerHTML = '<div class="county-list-empty">No counties found for this state</div>';
     }
@@ -2492,97 +2444,6 @@ async function loadCountiesForState(stateCode) {
   }
 }
 
-// Auto-detect counties from map location
-async function autoDetectCountiesFromMapLocation(lat, lng) {
-  // Only run if we're on the geocoding step
-  if (currentStep !== steps.findIndex(s => s.id === 'geocoding')) {
-    return;
-  }
-  
-  const stateSelect = document.getElementById('geo-state');
-  if (!stateSelect || !stateSelect.value) {
-    return; // State not selected yet
-  }
-  
-  const container = document.getElementById('geo-counties-container');
-  if (!container) {
-    return; // Container doesn't exist
-  }
-  
-  // Ensure counties are loaded
-  if (!countiesData[stateSelect.value] || countiesData[stateSelect.value].length === 0) {
-    // Counties not loaded yet, trigger load first
-    await loadCountiesForState(stateSelect.value);
-    // Wait a bit for counties to render
-    await new Promise(resolve => setTimeout(resolve, 200));
-  }
-  
-  // Check again after loading
-  if (!countiesData[stateSelect.value] || countiesData[stateSelect.value].length === 0) {
-    return; // Still no counties loaded
-  }
-  
-  const btn = document.getElementById('auto-detect-counties-btn');
-  const btnText = document.getElementById('auto-detect-counties-text');
-  
-  try {
-    if (btn) btn.disabled = true;
-    if (btnText) btnText.textContent = '⏳ Detecting...';
-    
-    // Show loading state
-    const currentContent = container.innerHTML;
-    container.innerHTML = '<div class="county-list-loading">Finding counties within 20 miles</div>';
-    
-    // Get geocoding provider and API key from form
-    const provider = document.querySelector('input[name="geocoding-provider"]:checked')?.value || 'nominatim';
-    const locationiqKeyInput = document.getElementById('locationiq-key');
-    const googleMapsKeyInput = document.getElementById('google-maps-key');
-    const locationiqKey = locationiqKeyInput?.value || null;
-    const googleMapsKey = googleMapsKeyInput?.value || null;
-    
-    const result = await api('/api/setup/counties-within-radius', 'POST', {
-      lat: lat,
-      lng: lng,
-      stateCode: stateSelect.value,
-      geocodingProvider: provider,
-      locationiqKey: locationiqKey,
-      googleMapsKey: googleMapsKey
-    });
-    
-    if (result.counties && result.counties.length > 0) {
-      // Clear existing selections and set new ones
-      selectedCounties.clear();
-      result.counties.forEach(county => selectedCounties.add(county));
-      
-      // Re-render with selected counties
-      renderCountiesList(countiesData[stateSelect.value]);
-      
-      showToast(`Auto-selected ${result.counties.length} counties within 20 miles`, 'success');
-    } else {
-      // Restore previous state
-      renderCountiesList(countiesData[stateSelect.value]);
-      showToast('No counties found within 20 miles', 'warning');
-    }
-  } catch (error) {
-    console.error('Error auto-detecting counties:', error);
-    // Restore previous state
-    if (countiesData[stateSelect.value]) {
-      renderCountiesList(countiesData[stateSelect.value]);
-    }
-    showToast('Error detecting counties', 'error');
-  } finally {
-    if (btn) btn.disabled = false;
-    if (btnText) btnText.textContent = '📍 Auto-detect from map';
-  }
-}
-
-window.autoDetectCountiesFromMap = function() {
-  if (mapCenterLocation) {
-    autoDetectCountiesFromMapLocation(mapCenterLocation.lat, mapCenterLocation.lng);
-  } else {
-    showToast('Please set a location on the map first', 'error');
-  }
-};
 
 function renderCountiesList(counties) {
   const container = document.getElementById('geo-counties-container');
