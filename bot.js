@@ -230,7 +230,6 @@ if (effectiveTranscriptionMode === 'icad' && !ICAD_URL) {
 
 // Now initialize derived variables
 const express = require('express');
-const fs = require('fs');
 const path = require('path');
 const bcrypt = require('bcrypt');
 const { v4: uuidv4 } = require('uuid');
