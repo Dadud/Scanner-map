@@ -171,10 +171,27 @@ function checkOptionalPackages() {
 // Try installing from package.json (with --no-audit --no-fund like installer)
 function attemptInstallFromPackageJson() {
   return new Promise((resolve, reject) => {
+    // Check if Discord is enabled to decide whether to skip scripts
+    let discordEnabled = false;
+    try {
+      const configPath = path.join(__dirname, 'data', 'config.json');
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        discordEnabled = config.discord?.enabled === true;
+      }
+    } catch (e) {
+      // Config doesn't exist or can't be read - assume Discord not enabled
+    }
+    
     // Use --legacy-peer-deps to handle Discord.js conflicts
-    // Use --ignore-scripts to skip problematic native builds (like opus)
-    // We'll install opus separately if needed
-    const installProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund'], {
+    // If Discord not enabled, use --ignore-scripts to skip building @discordjs/opus
+    const installArgs = ['install', '--legacy-peer-deps', '--no-audit', '--no-fund'];
+    if (!discordEnabled) {
+      installArgs.push('--ignore-scripts');
+      console.log('Discord not enabled - skipping native module builds (faster install)');
+    }
+    
+    const installProcess = spawn('npm', installArgs, {
       stdio: 'inherit',
       cwd: __dirname
     });
@@ -203,6 +220,18 @@ function attemptInstallFromPackageJson() {
 // Install core packages first, then optional Discord packages separately
 function attemptManualInstall() {
   return new Promise((resolve, reject) => {
+    // Check if Discord is enabled
+    let discordEnabled = false;
+    try {
+      const configPath = path.join(__dirname, 'data', 'config.json');
+      if (fs.existsSync(configPath)) {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        discordEnabled = config.discord?.enabled === true;
+      }
+    } catch (e) {
+      // Config doesn't exist or can't be read - assume Discord not enabled
+    }
+    
     // Core packages (required for basic functionality)
     const corePackages = [
       'dotenv', 'express', 'sqlite3', 'bcrypt', 'uuid', 'busboy', 'winston',
@@ -210,9 +239,6 @@ function attemptManualInstall() {
       'csv-parser', 'form-data', 'aws-sdk', 'libsodium-wrappers', 'node-cache',
       'openai', 'public-ip', 'axios', 'multer', 'archiver'
     ];
-    
-    // Discord packages (optional, may fail on Windows without build tools)
-    const discordPackages = ['discord.js', '@discordjs/voice'];
     
     console.log('Installing core packages manually...');
     const installProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...corePackages], {
@@ -222,31 +248,40 @@ function attemptManualInstall() {
     
     installProcess.on('close', (code) => {
       if (code === 0) {
-        // Core packages installed, try Discord packages separately
-        console.log('');
-        console.log('Installing Discord packages (optional)...');
-        const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
-          stdio: 'inherit',
-          cwd: __dirname
-        });
-        
-        discordProcess.on('close', (discordCode) => {
-          if (discordCode === 0) {
+        // Only install Discord packages if Discord is enabled
+        if (discordEnabled) {
+          console.log('');
+          console.log('Installing Discord packages...');
+          const discordPackages = ['discord.js', '@discordjs/voice'];
+          const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
+            stdio: 'inherit',
+            cwd: __dirname
+          });
+          
+          discordProcess.on('close', (discordCode) => {
+            if (discordCode === 0) {
+              resolve();
+            } else {
+              console.log('');
+              console.log('WARNING: Discord packages failed to install');
+              console.log('@discordjs/opus requires Visual Studio build tools to compile.');
+              console.log('Install: https://visualstudio.microsoft.com/downloads/');
+              console.log('Or run: npm install --build-from-source @discordjs/opus');
+              // Still resolve - core packages are installed
+              resolve();
+            }
+          });
+          
+          discordProcess.on('error', () => {
+            // Continue even if Discord install fails
             resolve();
-          } else {
-            console.log('');
-            console.log('WARNING: Discord packages failed to install (this is OK if not using Discord)');
-            console.log('If you need Discord features, install Visual Studio build tools:');
-            console.log('https://visualstudio.microsoft.com/downloads/');
-            // Still resolve - core packages are installed
-            resolve();
-          }
-        });
-        
-        discordProcess.on('error', () => {
-          // Continue even if Discord install fails
+          });
+        } else {
+          // Discord not enabled, skip Discord packages entirely
+          console.log('');
+          console.log('Discord not enabled - skipping Discord package installation');
           resolve();
-        });
+        }
       } else {
         // Try one more time (like installer does)
         console.log('First attempt failed, retrying...');
@@ -257,13 +292,18 @@ function attemptManualInstall() {
         
         retryProcess.on('close', (retryCode) => {
           if (retryCode === 0) {
-            // Try Discord packages
-            const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
-              stdio: 'inherit',
-              cwd: __dirname
-            });
-            discordProcess.on('close', () => resolve());
-            discordProcess.on('error', () => resolve());
+            // Only try Discord packages if enabled
+            if (discordEnabled) {
+              const discordPackages = ['discord.js', '@discordjs/voice'];
+              const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
+                stdio: 'inherit',
+                cwd: __dirname
+              });
+              discordProcess.on('close', () => resolve());
+              discordProcess.on('error', () => resolve());
+            } else {
+              resolve();
+            }
           } else {
             reject(new Error('Manual installation failed after retry'));
           }

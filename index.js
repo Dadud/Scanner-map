@@ -12,6 +12,34 @@ console.log('║           SCANNER MAP - Real-time Radio Mapping           ║')
 console.log('╚═══════════════════════════════════════════════════════════╝');
 console.log('');
 
+// Check Node.js version compatibility
+function checkNodeVersion() {
+  const nodeVersion = process.version;
+  const majorVersion = parseInt(nodeVersion.slice(1).split('.')[0], 10);
+  
+  if (majorVersion >= 21) {
+    console.log('');
+    console.log('⚠️  WARNING: You are using Node.js ' + nodeVersion);
+    console.log('⚠️  Recommended: Node.js 18.x or 20.x LTS');
+    console.log('⚠️  Node.js 21+ may require building native modules from source.');
+    console.log('⚠️  This can fail if Visual Studio build tools are not installed.');
+    console.log('');
+    console.log('   To install Node.js 20 LTS:');
+    console.log('   - Windows: winget install OpenJS.NodeJS.LTS');
+    console.log('   - Or download from: https://nodejs.org/');
+    console.log('');
+  } else if (majorVersion < 18) {
+    console.log('');
+    console.log('❌ ERROR: Node.js ' + nodeVersion + ' is not supported');
+    console.log('❌ Please upgrade to Node.js 18.x or 20.x LTS');
+    console.log('   Download from: https://nodejs.org/');
+    console.log('');
+    process.exit(1);
+  }
+}
+
+checkNodeVersion();
+
 // Configuration paths
 const CONFIG_PATH = path.join(__dirname, 'data', 'config.json');
 const ENV_PATH = path.join(__dirname, '.env');
@@ -246,7 +274,7 @@ function checkOptionalNpmPackages() {
 /**
  * Fallback: Manual package installation (like installer does)
  */
-function attemptManualNpmInstall() {
+function attemptManualNpmInstall(discordEnabled = false) {
   const { spawn } = require('child_process');
   
   return new Promise((resolve, reject) => {
@@ -258,9 +286,6 @@ function attemptManualNpmInstall() {
       'openai', 'public-ip', 'axios', 'multer', 'archiver'
     ];
     
-    // Discord packages (optional, may fail on Windows without build tools)
-    const discordPackages = ['discord.js', '@discordjs/voice'];
-    
     console.log('[Startup] Installing core packages manually...');
     const installProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...corePackages], {
       stdio: 'inherit',
@@ -269,31 +294,40 @@ function attemptManualNpmInstall() {
     
     installProcess.on('close', (code) => {
       if (code === 0) {
-        // Core packages installed, try Discord packages separately
-        console.log('');
-        console.log('[Startup] Installing Discord packages (optional)...');
-        const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
-          stdio: 'inherit',
-          cwd: __dirname
-        });
-        
-        discordProcess.on('close', (discordCode) => {
-          if (discordCode === 0) {
+        // Only install Discord packages if Discord is enabled
+        if (discordEnabled) {
+          console.log('');
+          console.log('[Startup] Installing Discord packages...');
+          const discordPackages = ['discord.js', '@discordjs/voice'];
+          const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
+            stdio: 'inherit',
+            cwd: __dirname
+          });
+          
+          discordProcess.on('close', (discordCode) => {
+            if (discordCode === 0) {
+              resolve();
+            } else {
+              console.log('');
+              console.log('[Startup] WARNING: Discord packages failed to install');
+              console.log('[Startup] @discordjs/opus requires Visual Studio build tools to compile.');
+              console.log('[Startup] Install: https://visualstudio.microsoft.com/downloads/');
+              console.log('[Startup] Or run: npm install --build-from-source @discordjs/opus');
+              // Still resolve - core packages are installed
+              resolve();
+            }
+          });
+          
+          discordProcess.on('error', () => {
+            // Continue even if Discord install fails
             resolve();
-          } else {
-            console.log('');
-            console.log('[Startup] WARNING: Discord packages failed to install (this is OK if not using Discord)');
-            console.log('[Startup] If you need Discord features, install Visual Studio build tools:');
-            console.log('[Startup] https://visualstudio.microsoft.com/downloads/');
-            // Still resolve - core packages are installed
-            resolve();
-          }
-        });
-        
-        discordProcess.on('error', () => {
-          // Continue even if Discord install fails
+          });
+        } else {
+          // Discord not enabled, skip Discord packages entirely
+          console.log('');
+          console.log('[Startup] Discord not enabled - skipping Discord package installation');
           resolve();
-        });
+        }
       } else {
         // Try one more time (like installer does)
         console.log('[Startup] First attempt failed, retrying...');
@@ -304,13 +338,18 @@ function attemptManualNpmInstall() {
         
         retryProcess.on('close', (retryCode) => {
           if (retryCode === 0) {
-            // Try Discord packages
-            const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
-              stdio: 'inherit',
-              cwd: __dirname
-            });
-            discordProcess.on('close', () => resolve());
-            discordProcess.on('error', () => resolve());
+            // Only try Discord packages if enabled
+            if (discordEnabled) {
+              const discordPackages = ['discord.js', '@discordjs/voice'];
+              const discordProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...discordPackages], {
+                stdio: 'inherit',
+                cwd: __dirname
+              });
+              discordProcess.on('close', () => resolve());
+              discordProcess.on('error', () => resolve());
+            } else {
+              resolve();
+            }
           } else {
             reject(new Error('Manual installation failed after retry'));
           }
@@ -340,6 +379,18 @@ async function ensureNpmDependencies() {
     } catch (e) {
       return false;
     }
+  }
+  
+  // Check if Discord is enabled (to skip installing Discord packages if not needed)
+  let discordEnabled = false;
+  try {
+    const configPath = path.join(__dirname, 'data', 'config.json');
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      discordEnabled = config.discord?.enabled === true;
+    }
+  } catch (e) {
+    // Config doesn't exist or can't be read - assume Discord not enabled
   }
   
   // Check if critical packages are installed
@@ -377,9 +428,18 @@ async function ensureNpmDependencies() {
     });
     
     // Step 2: Try installing from package.json first (with --legacy-peer-deps like installer)
+    // If Discord is not enabled, use --ignore-scripts to skip building native modules like opus
     return new Promise((resolve, reject) => {
       console.log('[Startup] Installing from package.json...');
-      const installProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund'], {
+      const installArgs = ['install', '--legacy-peer-deps', '--no-audit', '--no-fund'];
+      
+      // If Discord is not enabled, skip scripts to avoid building @discordjs/opus
+      if (!discordEnabled) {
+        installArgs.push('--ignore-scripts');
+        console.log('[Startup] Discord not enabled - skipping native module builds (faster install)');
+      }
+      
+      const installProcess = spawn('npm', installArgs, {
         stdio: 'inherit',
         cwd: __dirname
       });
@@ -396,7 +456,7 @@ async function ensureNpmDependencies() {
         if (stillMissing.length > 0) {
           console.log('');
           console.log('[Startup] Some critical packages still missing, trying manual installation...');
-          attemptManualNpmInstall()
+          attemptManualNpmInstall(discordEnabled)
             .then(() => {
               const finalMissing = [];
               for (const pkg of criticalPackages) {
@@ -432,7 +492,7 @@ async function ensureNpmDependencies() {
       
       installProcess.on('error', (err) => {
         console.log('[Startup] Error with package.json install, trying manual installation...');
-        attemptManualNpmInstall()
+        attemptManualNpmInstall(discordEnabled)
           .then(() => resolve())
           .catch(reject);
       });

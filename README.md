@@ -154,6 +154,7 @@ Other files:
 
 ## 💻 System Requirements
 - OS: Windows 10/11 or Debian/Ubuntu  
+- **Node.js: 18.x or 20.x LTS** (recommended for native module compatibility)  
 - CPU: Modern multi-core  
 - RAM: 16GB+ recommended  
 - GPU: (Optional) NVIDIA CUDA (8GB+ VRAM recommended)  
