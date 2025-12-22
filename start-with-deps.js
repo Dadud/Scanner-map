@@ -43,44 +43,151 @@ function checkDependencies() {
   return missingPackages;
 }
 
-// Function to install dependencies
+// Function to install dependencies (following installer pattern)
 function installDependencies() {
   return new Promise((resolve, reject) => {
     console.log('Dependencies missing or incomplete. Installing...');
     console.log('This may take a few minutes...');
     console.log('');
     
-    const installProcess = spawn('npm', ['install', '--legacy-peer-deps'], {
+    // Step 1: Clear npm cache (like Windows installer does)
+    console.log('Clearing npm cache...');
+    const cacheProcess = spawn('npm', ['cache', 'clean', '--force'], {
+      stdio: 'pipe',
+      shell: true,
+      cwd: __dirname
+    });
+    
+    cacheProcess.on('close', () => {
+      // Step 2: Try installing from package.json first (like installer does)
+      console.log('Installing dependencies from package.json...');
+      attemptInstallFromPackageJson()
+        .then(() => {
+          // Verify packages are installed
+          const stillMissing = checkDependencies();
+          if (stillMissing.length > 0) {
+            console.log('');
+            console.log('Some packages still missing, trying manual installation...');
+            attemptManualInstall()
+              .then(() => {
+                const finalMissing = checkDependencies();
+                if (finalMissing.length > 0) {
+                  console.error('');
+                  console.error('WARNING: Some packages may still be missing:', finalMissing.join(', '));
+                  console.error('Try running: npm install --legacy-peer-deps');
+                }
+                resolve();
+              })
+              .catch((err) => {
+                console.error('');
+                console.error('ERROR: Manual installation also failed');
+                reject(err);
+              });
+          } else {
+            console.log('');
+            console.log('Dependencies installed successfully!');
+            console.log('');
+            resolve();
+          }
+        })
+        .catch((err) => {
+          console.log('');
+          console.log('Package.json install failed, trying manual installation...');
+          attemptManualInstall()
+            .then(() => {
+              const finalMissing = checkDependencies();
+              if (finalMissing.length > 0) {
+                console.error('');
+                console.error('WARNING: Some packages may still be missing:', finalMissing.join(', '));
+                console.error('Try running: npm install --legacy-peer-deps');
+              }
+              resolve();
+            })
+            .catch((err) => {
+              console.error('');
+              console.error('ERROR: All installation attempts failed');
+              reject(err);
+            });
+        });
+    });
+    
+    cacheProcess.on('error', () => {
+      // Continue even if cache clear fails
+      attemptInstallFromPackageJson()
+        .then(() => resolve())
+        .catch(() => {
+          attemptManualInstall()
+            .then(() => resolve())
+            .catch(reject);
+        });
+    });
+  });
+}
+
+// Try installing from package.json (with --no-audit --no-fund like installer)
+function attemptInstallFromPackageJson() {
+  return new Promise((resolve, reject) => {
+    const installProcess = spawn('npm', ['install', '--no-audit', '--no-fund'], {
       stdio: 'inherit',
       shell: true,
       cwd: __dirname
     });
     
     installProcess.on('close', (code) => {
-      if (code !== 0) {
-        console.error('');
-        console.error('ERROR: Failed to install dependencies');
-        reject(new Error('npm install failed'));
-        return;
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error('npm install from package.json failed'));
       }
-      
-      console.log('');
-      console.log('Dependencies installed successfully!');
-      console.log('');
-      
-      // Verify critical packages are now installed
-      const stillMissing = checkDependencies();
-      if (stillMissing.length > 0) {
-        console.error('WARNING: Some packages may still be missing:', stillMissing.join(', '));
-        console.error('Try running: npm install --legacy-peer-deps');
-      }
-      
-      resolve();
     });
     
-    installProcess.on('error', (err) => {
-      reject(err);
+    installProcess.on('error', reject);
+  });
+}
+
+// Fallback: Manual package installation (like installer does)
+function attemptManualInstall() {
+  return new Promise((resolve, reject) => {
+    const packages = [
+      'dotenv', 'express', 'sqlite3', 'bcrypt', 'uuid', 'busboy', 'winston',
+      'moment-timezone', 'discord.js', '@discordjs/voice', 'prism-media',
+      'node-fetch@2', 'socket.io', 'csv-parser', 'form-data', 'aws-sdk',
+      'libsodium-wrappers', 'node-cache', 'openai', 'public-ip', 'axios',
+      'multer', 'archiver'
+    ];
+    
+    console.log('Installing packages manually...');
+    const installProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...packages], {
+      stdio: 'inherit',
+      shell: true,
+      cwd: __dirname
     });
+    
+    installProcess.on('close', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        // Try one more time (like installer does)
+        console.log('First attempt failed, retrying...');
+        const retryProcess = spawn('npm', ['install', '--legacy-peer-deps', '--no-audit', '--no-fund', ...packages], {
+          stdio: 'inherit',
+          shell: true,
+          cwd: __dirname
+        });
+        
+        retryProcess.on('close', (retryCode) => {
+          if (retryCode === 0) {
+            resolve();
+          } else {
+            reject(new Error('Manual installation failed after retry'));
+          }
+        });
+        
+        retryProcess.on('error', reject);
+      }
+    });
+    
+    installProcess.on('error', reject);
   });
 }
 
