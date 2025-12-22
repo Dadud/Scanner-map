@@ -207,10 +207,97 @@ async function startNormalMode() {
 }
 
 /**
+ * Check and install npm dependencies if needed
+ */
+async function ensureNpmDependencies() {
+  const nodeModulesPath = path.join(__dirname, 'node_modules');
+  const criticalPackages = ['express', 'discord.js', 'sqlite3', 'dotenv', 'winston'];
+  
+  // Function to check if a package is installed
+  function isPackageInstalled(packageName) {
+    try {
+      require.resolve(packageName);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  
+  // Check if critical packages are installed
+  const missingPackages = [];
+  for (const pkg of criticalPackages) {
+    if (!isPackageInstalled(pkg)) {
+      missingPackages.push(pkg);
+    }
+  }
+  
+  // If node_modules doesn't exist or packages are missing, install
+  if (!fs.existsSync(nodeModulesPath) || missingPackages.length > 0) {
+    console.log('[Startup] Checking npm dependencies...');
+    
+    if (missingPackages.length > 0) {
+      console.log(`[Startup] Missing packages detected: ${missingPackages.join(', ')}`);
+    } else {
+      console.log('[Startup] node_modules not found');
+    }
+    
+    console.log('[Startup] Installing dependencies (this may take a few minutes)...');
+    console.log('');
+    
+    const { spawn } = require('child_process');
+    
+    return new Promise((resolve, reject) => {
+      const installProcess = spawn('npm', ['install', '--legacy-peer-deps'], {
+        stdio: 'inherit',
+        shell: true,
+        cwd: __dirname
+      });
+      
+      installProcess.on('close', (code) => {
+        if (code !== 0) {
+          console.error('');
+          console.error('[Startup] ERROR: Failed to install dependencies');
+          console.error('[Startup] Try running manually: npm install --legacy-peer-deps');
+          reject(new Error('npm install failed'));
+          return;
+        }
+        
+        console.log('');
+        console.log('[Startup] Dependencies installed successfully!');
+        console.log('');
+        
+        // Verify critical packages are now installed
+        const stillMissing = [];
+        for (const pkg of criticalPackages) {
+          if (!isPackageInstalled(pkg)) {
+            stillMissing.push(pkg);
+          }
+        }
+        
+        if (stillMissing.length > 0) {
+          console.error('[Startup] WARNING: Some packages may still be missing:', stillMissing.join(', '));
+          console.error('[Startup] Try running: npm install --legacy-peer-deps');
+        }
+        
+        resolve();
+      });
+      
+      installProcess.on('error', (err) => {
+        console.error('[Startup] Error running npm install:', err.message);
+        reject(err);
+      });
+    });
+  }
+}
+
+/**
  * Main entry point
  */
 async function main() {
   try {
+    // Check and install npm dependencies first
+    await ensureNpmDependencies();
+    
     // Check if setup is needed
     const needsSetup = isSetupNeeded();
     
