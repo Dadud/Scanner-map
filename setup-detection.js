@@ -413,27 +413,53 @@ async function fetchTownsInCounties(counties, stateCode, apiKey = null) {
     if (apiKey && counties.length > 0) {
       // For each county, try to get additional towns using LocationIQ
       for (const county of counties.slice(0, 5)) { // Limit to avoid too many API calls
-        try {
-          const query = `${county} County, ${stateCode}, USA`;
-          const response = await fetch(`https://us1.locationiq.com/v1/search.php?key=${apiKey}&q=${encodeURIComponent(query)}&format=json&tag=place:city,place:town,place:village&limit=20`, {
-            timeout: 5000
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            if (Array.isArray(data)) {
-              for (const place of data) {
-                if (place.name && place.name.length > 1 && !place.name.toLowerCase().includes('county')) {
-                  towns.add(place.name);
+        let retries = 3;
+        let success = false;
+        
+        while (retries > 0 && !success) {
+          try {
+            const query = `${county} County, ${stateCode}, USA`;
+            const response = await fetch(`https://us1.locationiq.com/v1/search.php?key=${apiKey}&q=${encodeURIComponent(query)}&format=json&tag=place:city,place:town,place:village&limit=20`, {
+              timeout: 5000
+            });
+            
+            // Handle rate limiting (429) with exponential backoff
+            if (response.status === 429) {
+              const backoffDelay = Math.min(1000 * Math.pow(2, 3 - retries), 10000); // Max 10 seconds
+              console.warn(`[Detection] Rate limited fetching towns for ${county}, waiting ${backoffDelay}ms...`);
+              await new Promise(resolve => setTimeout(resolve, backoffDelay));
+              retries--;
+              continue;
+            }
+            
+            if (response.ok) {
+              const data = await response.json();
+              if (Array.isArray(data)) {
+                for (const place of data) {
+                  if (place.name && place.name.length > 1 && !place.name.toLowerCase().includes('county')) {
+                    towns.add(place.name);
+                  }
                 }
               }
+              success = true;
+            } else {
+              // Non-429 error, skip this county
+              retries = 0;
+            }
+            
+            // Rate limiting delay: LocationIQ free tier is 1 req/sec, use 1200ms to be safe
+            await new Promise(resolve => setTimeout(resolve, 1200));
+          } catch (error) {
+            // On timeout or other error, retry if attempts remain
+            if (retries > 1) {
+              const backoffDelay = Math.min(1000 * Math.pow(2, 3 - retries), 5000);
+              await new Promise(resolve => setTimeout(resolve, backoffDelay));
+            }
+            retries--;
+            if (retries === 0) {
+              // Silently fail - this is optional enhancement
             }
           }
-          
-          // Small delay to respect rate limits
-          await new Promise(resolve => setTimeout(resolve, 200));
-        } catch (error) {
-          // Silently fail - this is optional enhancement
         }
       }
     }

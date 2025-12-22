@@ -295,20 +295,16 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
     
     console.log(`[Setup] Checking ${countiesToCheck.length} counties for location (${lat}, ${lng}) using ${providerName} (provider: ${provider})`);
     
-    for (const county of countiesToCheck) {
-      try {
-        // Check cache first
-        let countyLat, countyLng;
-        if (countyCoordinates.has(county)) {
-          [countyLat, countyLng] = countyCoordinates.get(county);
-        } else {
-          // Geocode county to get its coordinates
-          const query = `${county} County, ${stateCode}, USA`;
-          const fetch = require('node-fetch');
+    // Helper function to geocode with retry logic
+    const geocodeWithRetry = async (county, query, maxRetries = 3) => {
+      const fetch = require('node-fetch');
+      
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
           let response;
           
           if (useLocationIQ) {
-            // Use LocationIQ API (better rate limits)
+            // Use LocationIQ API
             const params = new URLSearchParams({
               key: locationiqKey,
               q: query,
@@ -318,7 +314,7 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
             });
             
             response = await fetch(`https://us1.locationiq.com/v1/search?${params.toString()}`, {
-              timeout: 10000 // 10 second timeout for LocationIQ
+              timeout: 10000
             });
           } else if (useGoogleMaps) {
             // Use Google Maps Geocoding API
@@ -328,12 +324,12 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
             });
             
             response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`, {
-              timeout: 10000 // 10 second timeout for Google Maps
+              timeout: 10000
             });
           } else {
             // Use Nominatim (free but strict rate limits: 1 req/sec)
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 10000); // Increased timeout to 10s
+            const timeoutId = setTimeout(() => controller.abort(), 10000);
             
             response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1&addressdetails=1`, {
               signal: controller.signal,
@@ -345,48 +341,95 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
             clearTimeout(timeoutId);
           }
           
+          // Handle rate limiting (429) with exponential backoff
+          if (response.status === 429) {
+            const errorText = await response.text().catch(() => '');
+            const backoffDelay = Math.min(1000 * Math.pow(2, attempt), 10000); // Max 10 seconds
+            console.warn(`[Setup] Rate limited for ${county} (attempt ${attempt + 1}/${maxRetries}), waiting ${backoffDelay}ms...`);
+            await new Promise(resolve => setTimeout(resolve, backoffDelay));
+            continue; // Retry
+          }
+          
           if (response.ok) {
             const data = await response.json();
             
             // Parse response based on provider
             if (useGoogleMaps) {
-              // Google Maps returns { status: 'OK', results: [...] }
               if (data.status === 'OK' && data.results && data.results.length > 0) {
                 const location = data.results[0].geometry.location;
-                countyLat = parseFloat(location.lat);
-                countyLng = parseFloat(location.lng);
-                countyCoordinates.set(county, [countyLat, countyLng]);
-              } else {
-                console.warn(`[Setup] Google Maps returned status: ${data.status} for ${county}`);
-                continue; // Skip if no results
+                return [parseFloat(location.lat), parseFloat(location.lng)];
               }
+              return null;
             } else {
               // LocationIQ and Nominatim return array directly
               if (data && data.length > 0) {
-                countyLat = parseFloat(data[0].lat);
-                countyLng = parseFloat(data[0].lon);
-                countyCoordinates.set(county, [countyLat, countyLng]);
-              } else {
-                continue; // Skip if no results
+                return [parseFloat(data[0].lat), parseFloat(data[0].lon)];
               }
+              return null;
             }
           } else {
             const errorText = await response.text().catch(() => '');
             console.warn(`[Setup] Geocoding API error for ${county}: ${response.status} ${response.statusText} - ${errorText}`);
-            continue; // Skip on error
+            return null;
+          }
+        } catch (error) {
+          if (error.name === 'AbortError') {
+            console.warn(`[Setup] Timeout geocoding county ${county} (attempt ${attempt + 1}/${maxRetries})`);
+          } else {
+            console.warn(`[Setup] Error geocoding county ${county} (attempt ${attempt + 1}/${maxRetries}):`, error.message);
           }
           
-          // Rate limiting based on provider
-          if (useLocationIQ) {
-            // LocationIQ allows 2-5 requests per second depending on plan, use 500ms delay for safety
-            await new Promise(resolve => setTimeout(resolve, 500));
-          } else if (useGoogleMaps) {
-            // Google Maps allows up to 50 requests per second, use 200ms delay for safety
-            await new Promise(resolve => setTimeout(resolve, 200));
-          } else {
-            // Nominatim: 1 request per second (strict)
-            await new Promise(resolve => setTimeout(resolve, 1100));
+          // On last attempt, return null
+          if (attempt === maxRetries - 1) {
+            return null;
           }
+          
+          // Wait before retry
+          const backoffDelay = Math.min(1000 * Math.pow(2, attempt), 5000);
+          await new Promise(resolve => setTimeout(resolve, backoffDelay));
+        }
+      }
+      return null;
+    };
+    
+    // Rate limiting delays based on provider (conservative values)
+    const getRateLimitDelay = () => {
+      if (useLocationIQ) {
+        // LocationIQ free tier: 1 req/sec, paid tiers: 2-5 req/sec
+        // Use 1200ms delay to be safe (slightly more than 1 req/sec)
+        return 1200;
+      } else if (useGoogleMaps) {
+        // Google Maps allows up to 50 requests per second
+        return 200;
+      } else {
+        // Nominatim: 1 request per second (strict)
+        return 1100;
+      }
+    };
+    
+    const rateLimitDelay = getRateLimitDelay();
+    
+    for (const county of countiesToCheck) {
+      try {
+        // Check cache first
+        let countyLat, countyLng;
+        if (countyCoordinates.has(county)) {
+          [countyLat, countyLng] = countyCoordinates.get(county);
+        } else {
+          // Geocode county to get its coordinates
+          const query = `${county} County, ${stateCode}, USA`;
+          const coords = await geocodeWithRetry(county, query);
+          
+          if (coords) {
+            [countyLat, countyLng] = coords;
+            countyCoordinates.set(county, coords);
+          } else {
+            // Skip this county if geocoding failed after retries
+            continue;
+          }
+          
+          // Always apply rate limiting delay after each request (success or failure)
+          await new Promise(resolve => setTimeout(resolve, rateLimitDelay));
         }
         
         // Calculate distance from user location to county
@@ -398,11 +441,9 @@ app.post('/api/setup/counties-within-radius', async (req, res) => {
         }
       } catch (error) {
         // Skip county on error, continue with next
-        if (error.name === 'AbortError') {
-          console.warn(`[Setup] Timeout geocoding county ${county}`);
-        } else {
-          console.warn(`[Setup] Error geocoding county ${county}:`, error.message);
-        }
+        console.warn(`[Setup] Unexpected error processing county ${county}:`, error.message);
+        // Still apply rate limit delay even on error
+        await new Promise(resolve => setTimeout(resolve, rateLimitDelay));
       }
     }
     
