@@ -1,0 +1,89 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Call {
+  id            String    @id @default(uuid())
+  talkgroupId   String
+  timestamp     DateTime
+  transcription String?
+  audioUrl      String?
+  address       String?
+  lat           Float?
+  lon           Float?
+  category      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  talkgroup     Talkgroup @relation(fields: [talkgroupId], references: [id])
+
+  @@index([talkgroupId])
+  @@index([timestamp])
+  @@index([createdAt])
+}
+
+model Talkgroup {
+  id          String  @id
+  hex         String?
+  alphaTag    String?
+  mode        String?
+  description String?
+  tag         String?
+  county      String?
+
+  calls       Call[]
+}
+
+model User {
+  id           String    @id @default(uuid())
+  username     String    @unique
+  passwordHash String
+  salt         String
+  isAdmin      Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions     Session[]
+}
+
+model Session {
+  id            String   @id @default(uuid())
+  userId        String
+  token         String   @unique
+  expiresAt     DateTime
+  lastActivity  DateTime @default(now())
+  ipAddress     String?
+  userAgent     String?
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([userId])
+}
+
+model GlobalKeyword {
+  id          String  @id @default(uuid())
+  keyword     String  @unique
+  talkgroupId String?
+}
+
+model Frequency {
+  id          String  @id @default(uuid())
+  frequency   String
+  description String?
+  talkgroupId String?
+}
+
+model AudioFile {
+  id              String   @id @default(uuid())
+  callId          String   @unique
+  audioData       Bytes?
+  storageType     String   @default("local")
+  s3Key           String?
+  createdAt       DateTime @default(now())
+}
