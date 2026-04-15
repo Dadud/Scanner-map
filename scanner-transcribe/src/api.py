@@ -1,30 +1,32 @@
-import os
 import asyncio
-import json
-import redis.asyncio as redis
 from fastapi import FastAPI
-from config import REDIS_URL, ENABLE_TONE_DETECTION
-from transcriber import load_model, transcribe
+from .transcriber import load_model
+from .transcription_service import handle_transcription_request, run_transcription_listener
 
 app = FastAPI()
-redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+listener_task = None
 
 @app.on_event("startup")
 async def startup():
+    global listener_task
     load_model()
+    if listener_task is None or listener_task.done():
+        listener_task = asyncio.create_task(run_transcription_listener())
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    global listener_task
+    if listener_task is not None:
+        listener_task.cancel()
+        try:
+            await listener_task
+        except asyncio.CancelledError:
+            pass
 
 @app.post("/transcribe")
 async def transcribe_audio(data: dict):
-    audio_url = data.get("audioUrl")
-    call_id = data.get("callId")
-
-    try:
-        text = await transcribe(audio_url)
-        result = {"callId": call_id, "transcription": text, "success": True}
-        await redis_client.publish("transcription:complete", json.dumps(result))
-        return result
-    except Exception as e:
-        return {"callId": call_id, "error": str(e), "success": False}
+    return await handle_transcription_request(data)
 
 @app.get("/health")
 async def health():

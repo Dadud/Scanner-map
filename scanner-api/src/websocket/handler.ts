@@ -1,4 +1,4 @@
-import { FastifyPluginAsync } from 'fastify';
+import { FastifyPluginAsync, FastifyInstance } from 'fastify';
 import type Redis from 'ioredis';
 import { WebSocket } from 'ws';
 
@@ -66,22 +66,52 @@ export const websocketPlugin: FastifyPluginAsync = async (fastify) => {
   });
 };
 
-export function setupWebSocketRelay(redisSub: Redis) {
+export function setupWebSocketRelay(fastify: FastifyInstance) {
   if (relayInitialized) {
     return;
   }
 
   relayInitialized = true;
 
-  void redisSub.subscribe('calls:new', 'calls:updated', 'calls:deleted', 'calls:purged');
+  const { redisSub, prisma } = fastify;
 
-  redisSub.on('message', (channel: string, message: string) => {
+  void redisSub.subscribe('calls:new', 'calls:updated', 'calls:deleted', 'calls:purged', 'transcription:complete');
+
+  redisSub.on('message', async (channel: string, message: string) => {
     const eventTypeByChannel: Record<string, string> = {
       'calls:new': 'newCall',
       'calls:updated': 'updatedCall',
       'calls:deleted': 'deletedCall',
       'calls:purged': 'purgedCalls'
     };
+
+    if (channel === 'transcription:complete') {
+      let payload: { callId?: string; transcription?: string; success?: boolean } | null = null;
+
+      try {
+        payload = JSON.parse(message) as { callId?: string; transcription?: string; success?: boolean };
+      } catch {
+        return;
+      }
+
+      if (!payload?.callId || !payload.success || !payload.transcription) {
+        return;
+      }
+
+      try {
+        const updatedCall = await prisma.call.update({
+          where: { id: payload.callId },
+          data: { transcription: payload.transcription },
+          include: { talkgroup: true }
+        });
+
+        broadcast('calls', 'updatedCall', updatedCall);
+      } catch {
+        return;
+      }
+
+      return;
+    }
 
     const eventType = eventTypeByChannel[channel];
     if (!eventType) {

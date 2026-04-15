@@ -32,7 +32,7 @@ export async function buildServer() {
   await app.register(prismaPlugin);
   await app.register(redisPlugin);
   await app.register(jwtPlugin);
-  setupWebSocketRelay(app.redisSub);
+  setupWebSocketRelay(app);
 
   await app.register(CallsRouter, { prefix: '/api/calls' });
   await app.register(TalkgroupsRouter, { prefix: '/api/talkgroups' });

@@ -3,13 +3,27 @@ import asyncio
 import json
 import tempfile
 from pathlib import Path
-from transcriber import transcriber
-from tone_detector import tone_detector
-from config import TRANSCRIPTION_MODE, REDIS_URL, ENABLE_TONE_DETECTION, TONE_DETECTION_TYPE
+from urllib.parse import urlparse
+from urllib.request import urlretrieve
 
 import redis.asyncio as redis
 
+from . import transcriber
+from .config import REDIS_URL
+from .tone_detector import tone_detector
+
 redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+
+
+async def resolve_audio_source(audio_source: str) -> tuple[str, str | None]:
+    parsed = urlparse(audio_source)
+    if parsed.scheme in {'http', 'https'}:
+        suffix = Path(parsed.path).suffix or '.audio'
+        fd, temp_path = tempfile.mkstemp(suffix=suffix)
+        Path(temp_path).unlink(missing_ok=True)
+        await asyncio.to_thread(urlretrieve, audio_source, temp_path)
+        return temp_path, temp_path
+    return audio_source, None
 
 async def process_audio(audio_path: str, call_id: str, talkgroup_id: str):
     result = {
@@ -20,12 +34,15 @@ async def process_audio(audio_path: str, call_id: str, talkgroup_id: str):
         'success': True
     }
 
+    temp_path = None
+
     try:
+        resolved_audio_path, temp_path = await resolve_audio_source(audio_path)
         enable_tone = os.getenv('ENABLE_TONE_DETECTION', 'false').lower() == 'true'
         tone_mode = os.getenv('TONE_DETECTION_TYPE', 'auto')
 
         if enable_tone:
-            tone_result = tone_detector.detect(audio_path, mode=tone_mode)
+            tone_result = tone_detector.detect(resolved_audio_path, mode=tone_mode)
             result['toneDetection'] = tone_result
 
             if tone_result['has_tone']:
@@ -33,15 +50,8 @@ async def process_audio(audio_path: str, call_id: str, talkgroup_id: str):
             else:
                 print(f"[Tone Detection] No tone detected")
 
-        segments, info = transcriber.model.transcribe(
-            audio_path,
-            beam_size=5,
-            vad_filter=True
-        )
-
-        transcript = " ".join([s.text for s in segments])
+        transcript = await transcriber.transcribe(resolved_audio_path)
         result['transcription'] = transcript
-        result['language'] = info.language if hasattr(info, 'language') else None
 
         print(f"[Transcription] Completed: {len(transcript)} chars")
 
@@ -49,8 +59,10 @@ async def process_audio(audio_path: str, call_id: str, talkgroup_id: str):
         result['error'] = str(e)
         result['success'] = False
         print(f"[Error] {e}")
+    finally:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
 
-    await redis_client.publish('transcription:complete', json.dumps(result))
     return result
 
 async def handle_transcription_request(data: dict):
@@ -62,6 +74,7 @@ async def handle_transcription_request(data: dict):
         return {'error': 'Missing audio_url or call_id', 'success': False}
 
     result = await process_audio(audio_url, call_id, talkgroup_id)
+    await redis_client.publish('transcription:complete', json.dumps(result))
     return result
 
 async def main():
@@ -80,6 +93,10 @@ async def main():
                 print(f"[Error] Invalid JSON: {e}")
             except Exception as e:
                 print(f"[Error] {e}")
+
+
+async def run_transcription_listener():
+    await main()
 
 if __name__ == '__main__':
     transcriber.load_model()

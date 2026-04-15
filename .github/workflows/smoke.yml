@@ -1,0 +1,99 @@
+name: Runtime Smoke
+
+on:
+  workflow_run:
+    workflows: [Build and Push Images]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: Image tag to test
+        required: false
+        default: refactor
+
+concurrency:
+  group: smoke-${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  smoke:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || github.event.workflow_run.head_sha }}
+      DOCKER_ORG: dadud
+      DOCKER_REGISTRY: ghcr.io
+      POSTGRES_USER: scanner
+      POSTGRES_PASSWORD: scanner
+      POSTGRES_DB: scanner
+      REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install smoke test dependencies
+        run: pip install requests websocket-client redis
+
+      - name: Pull and start stack
+        run: |
+          docker compose -f docker-compose.prebuilt.yml up -d scanner-postgres scanner-redis scanner-api scanner-transcribe scanner-ui
+
+      - name: Wait for HTTP services
+        run: |
+          python - <<'PY'
+          import time
+          import requests
+
+          urls = [
+              'http://localhost:3000/api/health',
+              'http://localhost:8001/health',
+              'http://localhost'
+          ]
+
+          for url in urls:
+              deadline = time.time() + 180
+              while time.time() < deadline:
+                  try:
+                      response = requests.get(url, timeout=5)
+                      if response.ok:
+                          print(f'ready: {url}')
+                          break
+                  except Exception:
+                      pass
+                  time.sleep(2)
+              else:
+                  raise SystemExit(f'timed out waiting for {url}')
+          PY
+
+      - name: Initialize database schema
+        run: docker compose -f docker-compose.prebuilt.yml exec -T scanner-api npx prisma db push --accept-data-loss
+
+      - name: Seed smoke talkgroup
+        run: |
+          docker compose -f docker-compose.prebuilt.yml exec -T scanner-postgres psql -U scanner -d scanner -c "INSERT INTO \"Talkgroup\" (id, \"alphaTag\") VALUES ('smoke', 'Smoke Test') ON CONFLICT (id) DO NOTHING;"
+
+      - name: Run runtime smoke
+        run: python scripts/smoke_runtime.py
+
+      - name: Print compose logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.prebuilt.yml logs --no-color
+
+      - name: Tear down stack
+        if: always()
+        run: docker compose -f docker-compose.prebuilt.yml down -v

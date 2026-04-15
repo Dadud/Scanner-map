@@ -2,7 +2,7 @@ import asyncio
 import sys
 import json
 import argparse
-from transcriber import transcriber
+from . import transcriber
 
 async def process_transcription(audio_path: str, call_id: str, talkgroup_id: str):
     try:
