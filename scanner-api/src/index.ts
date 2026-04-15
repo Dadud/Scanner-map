@@ -9,7 +9,6 @@ import { UsersRouter } from './routes/users.js';
 import { AdminRouter } from './routes/admin.js';
 import { WebhookRouter } from './routes/webhook.js';
 import { ConfigRouter } from './routes/config.js';
-import { WebSocketHandler } from './websocket/handler.js';
 import { prismaPlugin } from './plugins/database.js';
 import { redisPlugin } from './plugins/redis.js';
 import { jwtPlugin } from './plugins/jwt.js';
@@ -41,10 +40,6 @@ export async function buildServer() {
   await app.register(WebhookRouter, { prefix: '/api/webhook' });
 
   app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
-
-  app.register(async function (instance) {
-    instance.get('/ws', { websocket: true }, WebSocketHandler);
-  });
 
   return app;
 }
