@@ -1,7 +1,8 @@
 import { FastifyPluginAsync } from 'fastify';
 import jwt from '@fastify/jwt';
+import fp from 'fastify-plugin';
 
-export const jwtPlugin: FastifyPluginAsync = async (fastify) => {
+const jwtPluginImpl: FastifyPluginAsync = async (fastify) => {
   await fastify.register(jwt, { secret: process.env.JWT_SECRET! });
 
   fastify.decorate('authenticate', async (request: any, reply: any) => {
@@ -17,3 +18,5 @@ export const jwtPlugin: FastifyPluginAsync = async (fastify) => {
     catch { reply.status(401).send({ error: 'Unauthorized' }); }
   });
 };
+
+export const jwtPlugin = fp(jwtPluginImpl, { name: 'jwt-plugin' });

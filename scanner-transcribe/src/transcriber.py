@@ -16,7 +16,15 @@ def load_model():
         print(f"Unsupported whisper model '{model_size}', falling back to 'base'")
         model_size = 'base'
     compute_type = 'float16' if device == 'cuda' else 'int8'
-    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    try:
+        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    except RuntimeError as exc:
+        if device == 'cuda':
+            print(f"CUDA model load failed ({exc}), falling back to CPU")
+            device = 'cpu'
+            model = WhisperModel(model_size, device=device, compute_type='int8')
+        else:
+            raise
     print(f"Whisper model '{model_size}' loaded on {device}")
 
 async def transcribe(audio_path: str) -> str:

@@ -1,4 +1,5 @@
 import { FastifyPluginAsync } from 'fastify';
+import fp from 'fastify-plugin';
 import Redis from 'ioredis';
 
 declare module 'fastify' {
@@ -9,7 +10,7 @@ declare module 'fastify' {
   }
 }
 
-export const redisPlugin: FastifyPluginAsync = async (fastify) => {
+const redisPluginImpl: FastifyPluginAsync = async (fastify) => {
   const redisUrl = process.env.REDIS_URL || 'redis://localhost:6379';
   const redis = new Redis(redisUrl);
   const redisPub = new Redis(redisUrl);
@@ -25,3 +26,5 @@ export const redisPlugin: FastifyPluginAsync = async (fastify) => {
     await redisSub.quit();
   });
 };
+
+export const redisPlugin = fp(redisPluginImpl, { name: 'redis-plugin' });
