@@ -1,77 +1,176 @@
 version: '3.8'
 
+x-common-env: &common-env
+  POSTGRES_USER: ${POSTGRES_USER:-scanner}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scanner}
+  POSTGRES_DB: ${POSTGRES_DB:-scanner}
+  REDIS_URL: redis://scanner-redis:6379
+  JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+
 services:
-  api:
+  scanner-api:
     build:
       context: ./scanner-api
       dockerfile: Dockerfile
+    container_name: scanner-api
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=postgresql://scanner:scanner@postgres:5432/scanner
-      - REDIS_URL=redis://redis:6379
+      <<: *common-env
+      - NODE_ENV=production
+      - PORT=3000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-scanner}:${POSTGRES_PASSWORD:-scanner}@scanner-postgres:5432/${POSTGRES_DB:-scanner}
+      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - GEOCODING_PROVIDER=${GEOCODING_PROVIDER:-locationiq}
+      - LOCATIONIQ_API_KEY=${LOCATIONIQ_API_KEY}
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+      - GEOCODING_STATE=${GEOCODING_STATE}
+      - GEOCODING_COUNTRY=${GEOCODING_COUNTRY}
+      - GEOCODING_CITY=${GEOCODING_CITY}
+      - TRANSCRIPTION_MODE=${TRANSCRIPTION_MODE:-local}
+      - TRANSCRIPTION_DEVICE=${TRANSCRIPTION_DEVICE:-cpu}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - FASTER_WHISPER_URL=${FASTER_WHISPER_URL:-http://scanner-transcribe:8001}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      - OLLAMA_URL=${OLLAMA_URL:-http://localhost:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o-mini}
+      - ENABLE_AUTH=${ENABLE_AUTH:-false}
+      - STORAGE_MODE=${STORAGE_MODE:-local}
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY}
+      - S3_SECRET_KEY=${S3_SECRET_KEY}
+      - ENABLE_TONE_DETECTION=${ENABLE_TONE_DETECTION:-false}
+      - TONE_DETECTION_TYPE=${TONE_DETECTION_TYPE:-auto}
     depends_on:
-      - postgres
-      - redis
+      scanner-postgres:
+        condition: service_healthy
+      scanner-redis:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - scanner-network
 
-  transcription:
+  scanner-transcribe:
     build:
       context: ./scanner-transcribe
       dockerfile: Dockerfile
+    container_name: scanner-transcribe
     ports:
       - "8001:8001"
     environment:
-      - REDIS_URL=redis://redis:6379
-      - TRANSCRIPTION_MODE=local
-      - TRANSCRIPTION_DEVICE=cpu
-      - WHISPER_MODEL=base
+      - TRANSCRIPTION_MODE=${TRANSCRIPTION_MODE:-local}
+      - TRANSCRIPTION_DEVICE=${TRANSCRIPTION_DEVICE:-cpu}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - FASTER_WHISPER_URL=http://scanner-transcribe:8001
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - REDIS_URL=redis://scanner-redis:6379
+      - ENABLE_TONE_DETECTION=${ENABLE_TONE_DETECTION:-false}
+      - TONE_DETECTION_TYPE=${TONE_DETECTION_TYPE:-auto}
     depends_on:
-      - redis
+      scanner-redis:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - scanner-network
+    deploy:
+      resources:
+        limits:
+          memory: 4G
 
-  discord:
+  scanner-discord:
     build:
       context: ./scanner-discord
       dockerfile: Dockerfile
+    container_name: scanner-discord
     environment:
+      - NODE_ENV=production
       - DISCORD_TOKEN=${DISCORD_TOKEN}
-      - REDIS_URL=redis://redis:6379
-      - API_URL=http://api:3000
+      - REDIS_URL=redis://scanner-redis:6379
+      - API_URL=http://scanner-api:3000
+      - DISCORD_ALERT_CHANNEL_ID=${DISCORD_ALERT_CHANNEL_ID}
+      - DISCORD_SUMMARY_CHANNEL_ID=${DISCORD_SUMMARY_CHANNEL_ID}
     depends_on:
-      - redis
+      scanner-api:
+        condition: service_healthy
+      scanner-redis:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - scanner-network
+    profiles:
+      - discord
 
-  ui:
+  scanner-ui:
     build:
       context: ./scanner-ui
       dockerfile: Dockerfile
+    container_name: scanner-ui
     ports:
-      - "5173:80"
-    depends_on:
-      - api
-    restart: unless-stopped
-
-  postgres:
-    image: postgres:16-alpine
+      - "80:80"
     environment:
-      - POSTGRES_USER=scanner
-      - POSTGRES_PASSWORD=scanner
-      - POSTGRES_DB=scanner
+      - API_URL=http://scanner-api:3000
+    depends_on:
+      - scanner-api
+    restart: unless-stopped
+    networks:
+      - scanner-network
+
+  scanner-postgres:
+    image: postgres:16-alpine
+    container_name: scanner-postgres
+    environment:
+      <<: *common-env
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-scanner}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - scanner-network
 
-  redis:
+  scanner-redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    container_name: scanner-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
+    ports:
+      - "6379:6379"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - scanner-network
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  scanner-network:
+    driver: bridge
