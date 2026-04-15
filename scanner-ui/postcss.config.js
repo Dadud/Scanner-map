@@ -1,4 +1,6 @@
+import tailwindcss from 'tailwindcss';
+import autoprefixer from 'autoprefixer';
+
 export default {
   plugins: [tailwindcss(), autoprefixer()],
-  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}']
 };
