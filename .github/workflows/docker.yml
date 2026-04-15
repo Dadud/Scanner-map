@@ -6,45 +6,87 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/scanner-map
+permissions:
+  contents: read
+  packages: write
 
 jobs:
-  build:
+  api:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      matrix:
-        service: [api, transcribe, discord, ui]
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/setup-buildx-action@v3
-
       - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-${{ matrix.service }}
-          tags: |
-            type=ref,branch=${{ github.ref_name }}
-            type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
-
       - uses: docker/build-push-action@v5
         with:
-          context: ./scanner-${{ matrix.service }}
+          context: ./scanner-api
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/Dadud/scanner-map-api:${{ github.ref_name }}
+            ghcr.io/Dadud/scanner-map-api:${{ github.sha }}
+            ghcr.io/Dadud/scanner-map-api:latest
+          platforms: linux/amd64
+
+  transcribe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./scanner-transcribe
+          push: true
+          tags: |
+            ghcr.io/Dadud/scanner-map-transcribe:${{ github.ref_name }}
+            ghcr.io/Dadud/scanner-map-transcribe:${{ github.sha }}
+            ghcr.io/Dadud/scanner-map-transcribe:latest
+          platforms: linux/amd64
+
+  discord:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./scanner-discord
+          push: true
+          tags: |
+            ghcr.io/Dadud/scanner-map-discord:${{ github.ref_name }}
+            ghcr.io/Dadud/scanner-map-discord:${{ github.sha }}
+            ghcr.io/Dadud/scanner-map-discord:latest
+          platforms: linux/amd64
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: ./scanner-ui
+          push: true
+          tags: |
+            ghcr.io/Dadud/scanner-map-ui:${{ github.ref_name }}
+            ghcr.io/Dadud/scanner-map-ui:${{ github.sha }}
+            ghcr.io/Dadud/scanner-map-ui:latest
           platforms: linux/amd64
