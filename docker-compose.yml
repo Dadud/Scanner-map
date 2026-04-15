@@ -14,20 +14,20 @@ services:
       - "3000:3000"
     environment:
       <<: *common-env
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-scanner}:${POSTGRES_PASSWORD:-scanner}@scanner-postgres:5432/${POSTGRES_DB:-scanner}
-      - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
-      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
-      - DISCORD_TOKEN=${DISCORD_TOKEN}
-      - GEOCODING_PROVIDER=${GEOCODING_PROVIDER:-locationiq}
-      - LOCATIONIQ_API_KEY=${LOCATIONIQ_API_KEY}
-      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
-      - TRANSCRIPTION_MODE=${TRANSCRIPTION_MODE:-local}
-      - FASTER_WHISPER_URL=${FASTER_WHISPER_URL:-http://scanner-transcribe:8001}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - AI_PROVIDER=${AI_PROVIDER:-ollama}
-      - OLLAMA_URL=${OLLAMA_URL:-http://localhost:11434}
-      - ENABLE_AUTH=${ENABLE_AUTH:-false}
-      - ENABLE_TONE_DETECTION=${ENABLE_TONE_DETECTION:-false}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-scanner}:${POSTGRES_PASSWORD:-scanner}@scanner-postgres:5432/${POSTGRES_DB:-scanner}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-locationiq}
+      LOCATIONIQ_API_KEY: ${LOCATIONIQ_API_KEY}
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY}
+      TRANSCRIPTION_MODE: ${TRANSCRIPTION_MODE:-local}
+      FASTER_WHISPER_URL: ${FASTER_WHISPER_URL:-http://scanner-transcribe:8001}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      AI_PROVIDER: ${AI_PROVIDER:-ollama}
+      OLLAMA_URL: ${OLLAMA_URL:-http://localhost:11434}
+      ENABLE_AUTH: ${ENABLE_AUTH:-false}
+      ENABLE_TONE_DETECTION: ${ENABLE_TONE_DETECTION:-false}
     depends_on:
       scanner-postgres:
         condition: service_healthy
@@ -48,13 +48,13 @@ services:
     ports:
       - "8001:8001"
     environment:
-      - TRANSCRIPTION_MODE=${TRANSCRIPTION_MODE:-local}
-      - TRANSCRIPTION_DEVICE=${TRANSCRIPTION_DEVICE:-cpu}
-      - WHISPER_MODEL=${WHISPER_MODEL:-base}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - REDIS_URL=redis://scanner-redis:6379
-      - ENABLE_TONE_DETECTION=${ENABLE_TONE_DETECTION:-false}
-      - TONE_DETECTION_TYPE=${TONE_DETECTION_TYPE:-auto}
+      TRANSCRIPTION_MODE: ${TRANSCRIPTION_MODE:-local}
+      TRANSCRIPTION_DEVICE: ${TRANSCRIPTION_DEVICE:-cpu}
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      REDIS_URL: redis://scanner-redis:6379
+      ENABLE_TONE_DETECTION: ${ENABLE_TONE_DETECTION:-false}
+      TONE_DETECTION_TYPE: ${TONE_DETECTION_TYPE:-auto}
     depends_on:
       scanner-redis:
         condition: service_healthy
@@ -70,11 +70,11 @@ services:
     image: ghcr.io/dadud/scanner-map-discord:${IMAGE_TAG:-latest}
     container_name: scanner-discord
     environment:
-      - DISCORD_TOKEN=${DISCORD_TOKEN}
-      - REDIS_URL=redis://scanner-redis:6379
-      - API_URL=http://scanner-api:3000
-      - DISCORD_ALERT_CHANNEL_ID=${DISCORD_ALERT_CHANNEL_ID}
-      - DISCORD_SUMMARY_CHANNEL_ID=${DISCORD_SUMMARY_CHANNEL_ID}
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      REDIS_URL: redis://scanner-redis:6379
+      API_URL: http://scanner-api:3000
+      DISCORD_ALERT_CHANNEL_ID: ${DISCORD_ALERT_CHANNEL_ID}
+      DISCORD_SUMMARY_CHANNEL_ID: ${DISCORD_SUMMARY_CHANNEL_ID}
     depends_on:
       scanner-api:
         condition: service_healthy

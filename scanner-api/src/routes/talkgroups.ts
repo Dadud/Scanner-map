@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 
@@ -11,12 +12,12 @@ export const TalkgroupsRouter: FastifyPluginAsync = async (fastify) => {
       search: z.string().optional()
     }).parse(request.query);
 
-    const where = q.search ? {
+    const where: Prisma.TalkgroupWhereInput | undefined = q.search ? {
       OR: [
-        { alphaTag: { contains: q.search, mode: 'insensitive' } },
+        { alphaTag: { contains: q.search, mode: Prisma.QueryMode.insensitive } },
         { id: { contains: q.search } }
       ]
-    } : {};
+    } : undefined;
 
     return fastify.prisma.talkgroup.findMany({ where, take: parseInt(q.limit), skip: parseInt(q.offset) });
   });
