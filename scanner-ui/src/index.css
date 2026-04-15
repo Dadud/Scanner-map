@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --scanner-dark: #1a1a2e;
+  --scanner-light: #16213e;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--scanner-dark);
+  color: white;
+}
+
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  background: #0a0a15;
+}
+
+.marker-cluster {
+  background-color: rgba(68, 68, 68, 0.6);
+}
+.marker-cluster div {
+  background-color: rgba(68, 68, 68, 0.8);
+  color: white;
+  font-weight: bold;
+}
+
+.scanner-popup .leaflet-popup-content-wrapper {
+  background: var(--scanner-dark);
+  color: white;
+  border-radius: 8px;
+}
+
+.scanner-popup .leaflet-popup-tip {
+  background: var(--scanner-dark);
+}
