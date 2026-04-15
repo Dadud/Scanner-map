@@ -1,6 +1,6 @@
 # Scanner Map - Refactored
 
-A real-time emergency scanner mapping system with a modern architecture.
+A real-time emergency scanner mapping system with a modern microservices architecture.
 
 ## Architecture
 
@@ -18,146 +18,218 @@ A real-time emergency scanner mapping system with a modern architecture.
          │                    │                      │
          ▼                    ▼                      ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│   Core API      │  │  Discord Bot    │  │  Transcription  │
-│   (Fastify)     │  │  (Separate)     │  │  (Python)       │
-│   Port: 3000    │  │  Port: -        │  │  Port: 8001     │
-└────────┬────────┘  └────────┬────────┘  └────────┬────────┘
-         │                    │                      │
-         ▼                    ▼                      ▼
+│   scanner-api   │  │ scanner-discord │  │scanner-transcribe│
+│   (Fastify)     │  │   (Discord)     │  │  (Python)        │
+│   Port: 3000    │  │                 │  │  Port: 8001      │
+└────────┬────────┘  └─────────────────┘  └─────────────────┘
+         │                                       │
+         ▼                                       ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                         POSTGRESQL                                       │
-│                   Port: 5432                                             │
+│                         POSTGRESQL                                      │
+│                         Port: 5432                                      │
 └─────────────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │     REDIS       │
+                    │   Port: 6379    │
+                    └─────────────────┘
 ```
 
 ## Services
 
-### scanner-api
-Fastify + TypeScript + Prisma API server
-- REST API for calls, talkgroups, users
-- WebSocket (Socket.IO) for real-time updates
-- Redis pub/sub for inter-service communication
-- Port: 3000
-
-### scanner-transcribe
-Python + faster-whisper transcription service
-- Local transcription with faster-whisper
-- gRPC or REST API interface
-- Port: 8001
-
-### scanner-discord
-Node.js Discord bot
-- Slash commands
-- Alert notifications
-- Summary embeds
-- Subscribes to Redis for new calls
-
-### scanner-ui
-React + Vite + TailwindCSS frontend
-- Leaflet map with markers
-- Real-time updates via WebSocket
-- Audio playback
-- Port: 5173 (dev) / 80 (prod)
+| Service | Technology | Description |
+|---------|------------|-------------|
+| **scanner-api** | Fastify + TypeScript + Prisma | REST API, WebSocket, Authentication |
+| **scanner-transcribe** | Python + faster-whisper | Audio transcription with tone detection |
+| **scanner-discord** | TypeScript + discord.js | Discord bot notifications |
+| **scanner-ui** | React + Vite + TailwindCSS | Web interface with Leaflet map |
 
 ## Quick Start
 
 ### Prerequisites
-- Docker and Docker Compose
-- PostgreSQL 16+
-- Redis 7+
-- Node.js 20+ (for development)
-- Python 3.11+ (for transcription)
 
-### Development
+- Docker & Docker Compose v2+
+- 4GB+ RAM recommended
+- 10GB+ disk space
 
-1. Clone the repository
+### 1. Clone and Configure
 
-2. Copy environment configuration:
 ```bash
+git clone https://github.com/Dadud/Scanner-map.git
+cd Scanner-map
 cp .env.example .env
-# Edit .env with your API keys
 ```
 
-3. Start infrastructure:
+### 2. Edit .env Configuration
+
 ```bash
-docker-compose up -d postgres redis
+# Required
+DISCORD_TOKEN=your_discord_bot_token
+
+# Optional - Geocoding
+LOCATIONIQ_API_KEY=your_locationiq_api_key
+
+# Optional - AI features
+OPENAI_API_KEY=your_openai_api_key
 ```
 
-4. Start API:
-```bash
-cd scanner-api
-npm install
-npx prisma db push
-npm run dev
-```
-
-5. Start transcription service:
-```bash
-cd scanner-transcribe
-pip install -r requirements.txt
-python -m uvicorn src.api:app --reload
-```
-
-6. Start UI:
-```bash
-cd scanner-ui
-npm install
-npm run dev
-```
-
-### Production
+### 3. Start Services
 
 ```bash
+# Linux/macOS
+./scripts/start.sh
+
+# Windows (PowerShell)
+.\scripts\start.ps1
+
+# Or manually with Docker Compose
 docker-compose up -d
 ```
 
+### 4. Access the Application
+
+- **Web UI**: http://localhost
+- **API**: http://localhost:3000
+- **API Docs**: http://localhost:3000/docs
+
 ## Configuration
 
-See `.env.example` for all environment variables.
+### Environment Variables
 
-### Required
-- `DATABASE_URL` - PostgreSQL connection string
-- `REDIS_URL` - Redis connection string
-- `DISCORD_TOKEN` - Discord bot token
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | PostgreSQL connection string | Database connection |
+| `REDIS_URL` | Redis connection string | Redis connection |
+| `DISCORD_TOKEN` | - | Discord bot token |
+| `LOCATIONIQ_API_KEY` | - | LocationIQ geocoding |
+| `GOOGLE_MAPS_API_KEY` | - | Google Maps geocoding |
+| `TRANSCRIPTION_MODE` | `local` | Transcription mode |
+| `WHISPER_MODEL` | `base` | Whisper model size |
+| `ENABLE_AUTH` | `false` | Enable authentication |
+| `ENABLE_TONE_DETECTION` | `false` | Enable tone detection |
 
-### Optional
-- `LOCATIONIQ_API_KEY` or `GOOGLE_MAPS_API_KEY` - Geocoding
-- `OPENAI_API_KEY` - AI features
+### Using Google Maps
+
+If using Google Maps instead of LocationIQ:
+
+```bash
+GEOCODING_PROVIDER=google
+GOOGLE_MAPS_API_KEY=your_api_key
+```
+
+### Using Remote Transcription
+
+```bash
+TRANSCRIPTION_MODE=remote
+FASTER_WHISPER_URL=http://your-transcription-server:8001
+```
+
+## Docker Compose Profiles
+
+```bash
+# Core services only (API, UI, PostgreSQL, Redis)
+docker-compose up -d
+
+# Include Discord bot
+docker-compose --profile discord up -d
+```
+
+## Services
+
+### Core Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| scanner-ui | 80 | Web interface |
+| scanner-api | 3000 | REST API + WebSocket |
+| scanner-postgres | 5432 | PostgreSQL database |
+| scanner-redis | 6379 | Redis cache/pub-sub |
+
+### Optional Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| scanner-transcribe | 8001 | Local transcription |
+| scanner-discord | - | Discord bot |
 
 ## API Endpoints
 
 ### Calls
-- `GET /api/calls` - List calls (supports pagination, filtering)
+
+- `GET /api/calls` - List calls with pagination
 - `GET /api/calls/:id` - Get single call
 - `POST /api/calls` - Create call
 - `PUT /api/calls/:id` - Update call
 - `DELETE /api/calls/:id` - Delete call
 
 ### Talkgroups
+
 - `GET /api/talkgroups` - List talkgroups
 - `GET /api/talkgroups/:id` - Get talkgroup with recent calls
 - `POST /api/talkgroups` - Create/upsert talkgroup
-- `POST /api/talkgroups/bulk` - Bulk import talkgroups
+- `POST /api/talkgroups/bulk` - Bulk import
 
-### Users & Auth
+### Users
+
 - `POST /api/users/register` - Register user
 - `POST /api/users/login` - Login
 - `POST /api/users/logout` - Logout
-- `GET /api/users/sessions/current` - Get current session
 
-### Webhook (for SDRTrunk)
-- `POST /api/webhook/call-upload` - Receive audio uploads
+### Admin
 
-## Real-time Events
+- `PUT /api/admin/markers/:id/location` - Update marker location
+- `DELETE /api/admin/markers/:id` - Delete marker
+- `POST /api/admin/calls/purge` - Purge old calls
+- `GET/POST/DELETE /api/admin/keywords` - Manage keyword alerts
 
-Connect to `/ws` with Socket.IO client. Subscribe to `calls` channel:
+### Webhook
 
-```javascript
-socket.emit('subscribe', 'calls');
-socket.on('newCall', (call) => { ... });
-socket.on('updatedCall', (call) => { ... });
-socket.on('deletedCall', ({ id }) => { ... });
+- `POST /api/webhook/call-upload` - SDRTrunk/TrunkRecorder upload
+
+## Development
+
+### Building Images
+
+```bash
+docker-compose build
 ```
+
+### Running Specific Services
+
+```bash
+# API only
+docker-compose up -d scanner-api scanner-postgres scanner-redis
+
+# With transcription
+docker-compose up -d scanner-api scanner-transcribe scanner-postgres scanner-redis
+
+# Full stack
+docker-compose up -d
+```
+
+### Logs
+
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f scanner-api
+```
+
+## Data Persistence
+
+Volumes are mounted for:
+- `postgres_data` - Database files
+- `redis_data` - Redis persistence
+
+## Security
+
+- JWT-based authentication
+- bcrypt password hashing
+- Admin-restricted marker editing
+- Secure session management
 
 ## License
 
