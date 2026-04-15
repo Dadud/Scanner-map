@@ -26,8 +26,8 @@ jobs:
           context: ./scanner-api
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/scanner-map-api:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/scanner-map-api:${{ github.sha }}
+            ghcr.io/dadud/scanner-map-api:${{ github.ref_name }}
+            ghcr.io/dadud/scanner-map-api:${{ github.sha }}
           platforms: linux/amd64
 
   transcribe:
@@ -45,8 +45,8 @@ jobs:
           context: ./scanner-transcribe
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/scanner-map-transcribe:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/scanner-map-transcribe:${{ github.sha }}
+            ghcr.io/dadud/scanner-map-transcribe:${{ github.ref_name }}
+            ghcr.io/dadud/scanner-map-transcribe:${{ github.sha }}
           platforms: linux/amd64
 
   discord:
@@ -64,8 +64,8 @@ jobs:
           context: ./scanner-discord
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/scanner-map-discord:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/scanner-map-discord:${{ github.sha }}
+            ghcr.io/dadud/scanner-map-discord:${{ github.ref_name }}
+            ghcr.io/dadud/scanner-map-discord:${{ github.sha }}
           platforms: linux/amd64
 
   ui:
@@ -83,6 +83,6 @@ jobs:
           context: ./scanner-ui
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/scanner-map-ui:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/scanner-map-ui:${{ github.sha }}
+            ghcr.io/dadud/scanner-map-ui:${{ github.ref_name }}
+            ghcr.io/dadud/scanner-map-ui:${{ github.sha }}
           platforms: linux/amd64
