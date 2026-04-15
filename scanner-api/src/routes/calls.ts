@@ -8,6 +8,8 @@ const QuerySchema = z.object({
   since: z.string().optional(),
 });
 
+interface IdParams { id: string }
+
 export const CallsRouter: FastifyPluginAsync = async (fastify) => {
   fastify.get('/', async (request) => {
     const q = QuerySchema.parse(request.query);
@@ -21,9 +23,9 @@ export const CallsRouter: FastifyPluginAsync = async (fastify) => {
     });
   });
 
-  fastify.get('/:id', async (request, reply) => {
+  fastify.get<{ Params: IdParams }>('/:id', async (request, reply) => {
     const call = await fastify.prisma.call.findUnique({
-      where: { id: request.params.id as string },
+      where: { id: request.params.id },
       include: { talkgroup: true }
     });
     if (!call) return reply.status(404).send({ error: 'Not found' });
@@ -45,8 +47,8 @@ export const CallsRouter: FastifyPluginAsync = async (fastify) => {
     return reply.status(201).send(call);
   });
 
-  fastify.delete('/:id', async (request, reply) => {
-    await fastify.prisma.call.delete({ where: { id: request.params.id as string } });
+  fastify.delete<{ Params: IdParams }>('/:id', async (request, reply) => {
+    await fastify.prisma.call.delete({ where: { id: request.params.id } });
     return reply.status(204).send();
   });
 };
