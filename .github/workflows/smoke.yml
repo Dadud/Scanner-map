@@ -1,6 +1,8 @@
 name: Runtime Smoke
 
 on:
+  push:
+    branches: [ main, refactor ]
   workflow_run:
     workflows: [Build and Push Images]
     types: [completed]
@@ -21,10 +23,10 @@ permissions:
 
 jobs:
   smoke:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     env:
-      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || github.event.workflow_run.head_sha }}
+      IMAGE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       DOCKER_ORG: dadud
       DOCKER_REGISTRY: ghcr.io
       POSTGRES_USER: scanner
@@ -34,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - uses: docker/login-action@v3
         with:
@@ -48,6 +50,21 @@ jobs:
 
       - name: Install smoke test dependencies
         run: pip install requests websocket-client redis
+
+      - name: Wait for built images
+        run: |
+          for image in scanner-map-api scanner-map-ui scanner-map-transcribe scanner-map-discord; do
+            for attempt in $(seq 1 30); do
+              if docker pull ghcr.io/dadud/${image}:${IMAGE_TAG}; then
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                echo "Timed out waiting for ghcr.io/dadud/${image}:${IMAGE_TAG}"
+                exit 1
+              fi
+              sleep 10
+            done
+          done
 
       - name: Pull and start stack
         run: |
