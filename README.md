@@ -46,6 +46,30 @@ docker-compose --profile discord up -d
 docker-compose logs -f
 ```
 
+## Verification
+
+Run the verification script from the repo root:
+
+```bash
+# Linux/macOS
+./scripts/verify.sh
+
+# Windows PowerShell
+./scripts/verify.ps1
+
+# Allow running while you still have local edits
+./scripts/verify.ps1 -AllowDirtyWorktree
+```
+
+What it checks:
+
+1. clean git worktree
+2. latest successful `Build and Push Images` workflow for the current commit, when `gh` is available
+3. local service builds, when Node and Python are installed
+4. compose file validation, when Docker is installed
+
+GitHub Actions also runs `Verify Refactor` automatically on pushes to `main` and `refactor`, plus pull requests to `main`.
+
 ## Configuration
 
 | Variable | Default | Description |

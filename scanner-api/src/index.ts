@@ -9,6 +9,7 @@ import { UsersRouter } from './routes/users.js';
 import { AdminRouter } from './routes/admin.js';
 import { WebhookRouter } from './routes/webhook.js';
 import { ConfigRouter } from './routes/config.js';
+import { setupWebSocketRelay, websocketPlugin } from './websocket/handler.js';
 import { prismaPlugin } from './plugins/database.js';
 import { redisPlugin } from './plugins/redis.js';
 import { jwtPlugin } from './plugins/jwt.js';
@@ -31,6 +32,7 @@ export async function buildServer() {
   await app.register(prismaPlugin);
   await app.register(redisPlugin);
   await app.register(jwtPlugin);
+  setupWebSocketRelay(app.redisSub);
 
   await app.register(CallsRouter, { prefix: '/api/calls' });
   await app.register(TalkgroupsRouter, { prefix: '/api/talkgroups' });
@@ -38,6 +40,7 @@ export async function buildServer() {
   await app.register(AdminRouter, { prefix: '/api/admin' });
   await app.register(ConfigRouter, { prefix: '/api/config' });
   await app.register(WebhookRouter, { prefix: '/api/webhook' });
+  await app.register(websocketPlugin);
 
   app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
 

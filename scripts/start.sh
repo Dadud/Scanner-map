@@ -4,10 +4,13 @@ set -e
 echo "=== Scanner Map Docker Setup ==="
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+cd "${REPO_ROOT}"
 
 if [ ! -f ".env" ]; then
     echo "Creating .env file from example..."
-    cp "${SCRIPT_DIR}/.env.example" "${SCRIPT_DIR}/.env"
+    cp "${REPO_ROOT}/.env.example" "${REPO_ROOT}/.env"
     echo ""
     echo "IMPORTANT: Please edit .env and add your configuration values:"
     echo "  - DISCORD_TOKEN (required for Discord bot)"

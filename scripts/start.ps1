@@ -3,10 +3,11 @@ $ErrorActionPreference = 'Stop'
 Write-Host "=== Scanner Map Docker Setup (Windows) ===" -ForegroundColor Cyan
 
 $ScriptDir = $PSScriptRoot
+$RepoRoot = Split-Path $ScriptDir -Parent
 
-if (-not (Test-Path ".env")) {
+if (-not (Test-Path (Join-Path $RepoRoot ".env"))) {
     Write-Host "Creating .env file from example..." -ForegroundColor Yellow
-    Copy-Item "$ScriptDir\.env.example" "$ScriptDir\.env"
+    Copy-Item (Join-Path $RepoRoot ".env.example") (Join-Path $RepoRoot ".env")
     Write-Host ""
     Write-Host "IMPORTANT: Please edit .env and add your configuration values:" -ForegroundColor Red
     Write-Host "  - DISCORD_TOKEN (required for Discord bot)"
@@ -21,6 +22,7 @@ Write-Host ""
 Write-Host "Starting Docker services..." -ForegroundColor Green
 
 $env:COMPOSE_PROJECT_NAME = "scannermap"
+Push-Location $RepoRoot
 
 docker network create scanner-network 2>$null | Out-Null
 
@@ -54,3 +56,5 @@ Write-Host ""
 Write-Host "View logs with:" -ForegroundColor Yellow
 Write-Host "  docker-compose logs -f"
 Write-Host ""
+
+Pop-Location
