@@ -1,22 +1,24 @@
 import { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 
+interface IdParams { id: string }
+
 export const AdminRouter: FastifyPluginAsync = async (fastify) => {
-  fastify.put('/markers/:id/location', async (request, reply) => {
+  fastify.put<{ Params: IdParams }>('/markers/:id/location', async (request, reply) => {
     const { lat, lon, address } = z.object({
       lat: z.number(), lon: z.number(), address: z.string().optional()
     }).parse(request.body);
 
     const call = await fastify.prisma.call.update({
-      where: { id: request.params.id as string }, data: { lat, lon, address },
+      where: { id: request.params.id }, data: { lat, lon, address },
       include: { talkgroup: true }
     });
     await fastify.redisPub.publish('calls:updated', JSON.stringify(call));
     return call;
   });
 
-  fastify.delete('/markers/:id', async (request, reply) => {
-    await fastify.prisma.call.delete({ where: { id: request.params.id as string } });
+  fastify.delete<{ Params: IdParams }>('/markers/:id', async (request, reply) => {
+    await fastify.prisma.call.delete({ where: { id: request.params.id } });
     await fastify.redisPub.publish('calls:deleted', JSON.stringify({ id: request.params.id }));
     return reply.status(204).send();
   });
@@ -41,7 +43,7 @@ export const AdminRouter: FastifyPluginAsync = async (fastify) => {
     return fastify.prisma.globalKeyword.upsert({ where: { keyword }, update: { talkgroupId }, create: { keyword, talkgroupId } });
   });
 
-  fastify.delete('/keywords/:id', async (request) => {
-    await fastify.prisma.globalKeyword.delete({ where: { id: request.params.id as string } });
+  fastify.delete<{ Params: IdParams }>('/keywords/:id', async (request) => {
+    await fastify.prisma.globalKeyword.delete({ where: { id: request.params.id } });
   });
 };
