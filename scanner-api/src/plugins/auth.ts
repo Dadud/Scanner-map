@@ -9,7 +9,11 @@ export interface AuthUser {
 
 declare module 'fastify' {
   interface FastifyRequest {
-    user: AuthUser | undefined;
+    user: AuthUser;
+  }
+  interface FastifyInstance {
+    authenticate(request: FastifyRequest, reply: FastifyReply): Promise<void>;
+    requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<void>;
   }
 }
 
@@ -43,8 +47,12 @@ export const authPlugin: FastifyPluginAsync = async (fastify) => {
       }
     });
   } else {
-    fastify.decorate('authenticate', async () => {});
-    fastify.decorate('requireAdmin', async () => {});
+    fastify.decorate('authenticate', async (_request: FastifyRequest, reply: FastifyReply) => {
+      return reply.status(200).send();
+    });
+    fastify.decorate('requireAdmin', async (_request: FastifyRequest, reply: FastifyReply) => {
+      return reply.status(200).send();
+    });
   }
 };
 
