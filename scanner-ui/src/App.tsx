@@ -2,11 +2,9 @@ import { useSocket } from './hooks/useSocket';
 import { Map } from './components/Map';
 import { CallFeed } from './components/CallFeed';
 import { Header } from './components/Header';
-import { useStore } from './store';
 
 export default function App() {
   useSocket();
-  const { selectedCall } = useStore();
 
   return (
     <div className="h-screen flex flex-col">
