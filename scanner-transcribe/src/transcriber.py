@@ -1,44 +1,18 @@
 import os
-import asyncio
 from faster_whisper import WhisperModel
-from config import TRANSCRIPTION_DEVICE, WHISPER_MODEL
 
-class Transcriber:
-    def __init__(self):
-        self.model = None
-        self.model_size = WHISPER_MODEL
-        self.device = TRANSCRIPTION_DEVICE
+model = None
 
-    def load_model(self):
-        if self.device == 'cuda':
-            compute_type = 'float16'
-        else:
-            compute_type = 'int8'
+def load_model():
+    global model
+    device = os.getenv('TRANSCRIPTION_DEVICE', 'cpu')
+    model_size = os.getenv('WHISPER_MODEL', 'base')
+    compute_type = 'float16' if device == 'cuda' else 'int8'
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    print(f"Whisper model '{model_size}' loaded on {device}")
 
-        self.model = WhisperModel(
-            self.model_size,
-            device=self.device,
-            compute_type=compute_type
-        )
-        print(f"Whisper model '{self.model_size}' loaded on {self.device}")
-
-    async def transcribe(self, audio_path: str, language: str = None) -> str:
-        if not self.model:
-            self.load_model()
-
-        segments, info = self.model.transcribe(
-            audio_path,
-            language=language,
-            beam_size=5,
-            vad_filter=True,
-            vad_parameters=dict(min_silence_duration_ms=500)
-        )
-
-        transcript_parts = []
-        for segment in segments:
-            transcript_parts.append(segment.text)
-
-        full_transcript = ' '.join(transcript_parts).strip()
-        return full_transcript
-
-transcriber = Transcriber()
+async def transcribe(audio_path: str) -> str:
+    if not model:
+        load_model()
+    segments, _ = model.transcribe(audio_path, beam_size=5, vad_filter=True)
+    return ' '.join([s.text for s in segments])
