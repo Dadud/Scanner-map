@@ -8,7 +8,7 @@ x-common-env: &common-env
 
 services:
   scanner-api:
-    image: ghcr.io/${GITHUB_ORG:-Dadud}/scanner-map-api:${IMAGE_TAG:-latest}
+    image: ghcr.io/dadud/scanner-map-api:${IMAGE_TAG:-latest}
     container_name: scanner-api
     ports:
       - "3000:3000"
@@ -43,7 +43,7 @@ services:
       - scanner-network
 
   scanner-transcribe:
-    image: ghcr.io/${GITHUB_ORG:-Dadud}/scanner-map-transcribe:${IMAGE_TAG:-latest}
+    image: ghcr.io/dadud/scanner-map-transcribe:${IMAGE_TAG:-latest}
     container_name: scanner-transcribe
     ports:
       - "8001:8001"
@@ -67,7 +67,7 @@ services:
           memory: 4G
 
   scanner-discord:
-    image: ghcr.io/${GITHUB_ORG:-Dadud}/scanner-map-discord:${IMAGE_TAG:-latest}
+    image: ghcr.io/dadud/scanner-map-discord:${IMAGE_TAG:-latest}
     container_name: scanner-discord
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
@@ -87,7 +87,7 @@ services:
       - discord
 
   scanner-ui:
-    image: ghcr.io/${GITHUB_ORG:-Dadud}/scanner-map-ui:${IMAGE_TAG:-latest}
+    image: ghcr.io/dadud/scanner-map-ui:${IMAGE_TAG:-latest}
     container_name: scanner-ui
     ports:
       - "80:80"
