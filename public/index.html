@@ -414,6 +414,442 @@
     .pac-icon {
       filter: invert(1) hue-rotate(120deg) brightness(1.5) !important;
     }
+
+    /* --- Settings Modal Styles --- */
+    .settings-modal-content {
+      width: 90%;
+      max-width: 700px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .settings-tabs {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 15px;
+      border-bottom: 1px solid rgba(0, 255, 0, 0.2);
+      padding-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
+    .settings-tab {
+      padding: 8px 16px;
+      background: rgba(0, 50, 0, 0.3);
+      border: 1px solid rgba(0, 255, 0, 0.3);
+      border-radius: 4px;
+      color: var(--text-color);
+      cursor: pointer;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+
+    .settings-tab:hover {
+      background: rgba(0, 100, 0, 0.4);
+      border-color: var(--primary-color);
+    }
+
+    .settings-tab.active {
+      background: rgba(0, 255, 0, 0.15);
+      border-color: var(--primary-color);
+      box-shadow: 0 0 8px rgba(0, 255, 0, 0.3);
+    }
+
+    .settings-section {
+      display: none;
+      flex-direction: column;
+      gap: 15px;
+      overflow-y: auto;
+      padding-right: 10px;
+      max-height: 55vh;
+    }
+
+    .settings-section.active {
+      display: flex;
+    }
+
+    .settings-group {
+      background: rgba(0, 30, 0, 0.4);
+      border: 1px solid rgba(0, 255, 0, 0.15);
+      border-radius: 6px;
+      padding: 15px;
+    }
+
+    .settings-group-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: var(--primary-color);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(0, 255, 0, 0.08);
+    }
+
+    .setting-row:last-child {
+      border-bottom: none;
+    }
+
+    .setting-label {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .setting-label span:first-child {
+      font-size: 13px;
+      color: var(--text-color);
+    }
+
+    .setting-label span:last-child {
+      font-size: 11px;
+      color: rgba(0, 255, 0, 0.5);
+    }
+
+    .setting-control {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .settings-toggle {
+      position: relative;
+      width: 48px;
+      height: 24px;
+    }
+
+    .settings-toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .settings-toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(0, 100, 0, 0.4);
+      border: 1px solid rgba(0, 255, 0, 0.3);
+      border-radius: 12px;
+      transition: 0.3s;
+    }
+
+    .settings-toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 2px;
+      bottom: 2px;
+      background-color: #666;
+      border-radius: 50%;
+      transition: 0.3s;
+    }
+
+    .settings-toggle input:checked + .settings-toggle-slider {
+      background-color: rgba(0, 255, 0, 0.3);
+      border-color: var(--primary-color);
+    }
+
+    .settings-toggle input:checked + .settings-toggle-slider:before {
+      transform: translateX(24px);
+      background-color: var(--primary-color);
+    }
+
+    .settings-select {
+      background: #000;
+      color: #00ff00;
+      border: 1px solid rgba(0, 255, 0, 0.4);
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      min-width: 120px;
+    }
+
+    .settings-input {
+      background: #000;
+      color: #00ff00;
+      border: 1px solid rgba(0, 255, 0, 0.4);
+      border-radius: 4px;
+      padding: 6px 10px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      width: 80px;
+      text-align: center;
+    }
+
+    .settings-range {
+      width: 120px;
+      accent-color: var(--primary-color);
+    }
+
+    .settings-actions {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid rgba(0, 255, 0, 0.2);
+    }
+
+    /* --- Onboarding Styles --- */
+    .onboarding-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.95);
+      z-index: 10000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .onboarding-container {
+      width: 90%;
+      max-width: 600px;
+      background: #0a0a0a;
+      border: 2px solid var(--primary-color);
+      border-radius: 8px;
+      box-shadow: 0 0 40px rgba(0, 255, 0, 0.3);
+      padding: 30px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    .onboarding-header {
+      text-align: center;
+      margin-bottom: 25px;
+    }
+
+    .onboarding-header h1 {
+      font-size: 24px;
+      color: var(--primary-color);
+      margin-bottom: 10px;
+      text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+    }
+
+    .onboarding-header p {
+      color: rgba(0, 255, 0, 0.7);
+      font-size: 14px;
+    }
+
+    .onboarding-step {
+      display: none;
+    }
+
+    .onboarding-step.active {
+      display: block;
+    }
+
+    .onboarding-step h2 {
+      font-size: 18px;
+      color: #00ff00;
+      margin-bottom: 15px;
+    }
+
+    .onboarding-step p {
+      font-size: 13px;
+      color: rgba(0, 255, 0, 0.8);
+      margin-bottom: 20px;
+      line-height: 1.5;
+    }
+
+    .onboarding-options {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .onboarding-option {
+      display: flex;
+      align-items: center;
+      padding: 12px 15px;
+      background: rgba(0, 50, 0, 0.3);
+      border: 1px solid rgba(0, 255, 0, 0.2);
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .onboarding-option:hover {
+      background: rgba(0, 100, 0, 0.4);
+      border-color: var(--primary-color);
+    }
+
+    .onboarding-option.selected {
+      background: rgba(0, 255, 0, 0.15);
+      border-color: var(--primary-color);
+    }
+
+    .onboarding-option input {
+      margin-right: 12px;
+      accent-color: var(--primary-color);
+      width: 18px;
+      height: 18px;
+    }
+
+    .onboarding-option label {
+      cursor: pointer;
+      flex: 1;
+    }
+
+    .onboarding-option .option-title {
+      font-size: 14px;
+      color: #00ff00;
+      display: block;
+    }
+
+    .onboarding-option .option-desc {
+      font-size: 11px;
+      color: rgba(0, 255, 0, 0.6);
+      display: block;
+      margin-top: 4px;
+    }
+
+    .onboarding-progress {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 25px;
+    }
+
+    .onboarding-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(0, 255, 0, 0.2);
+      border: 1px solid rgba(0, 255, 0, 0.4);
+      transition: all 0.3s;
+    }
+
+    .onboarding-dot.active {
+      background: var(--primary-color);
+      box-shadow: 0 0 8px var(--primary-color);
+    }
+
+    .onboarding-dot.completed {
+      background: #00aa00;
+    }
+
+    .onboarding-nav {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 20px;
+    }
+
+    .onboarding-btn {
+      padding: 10px 25px;
+      border: 1px solid var(--primary-color);
+      border-radius: 4px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .onboarding-btn.primary {
+      background: rgba(0, 255, 0, 0.2);
+      color: #00ff00;
+    }
+
+    .onboarding-btn.primary:hover {
+      background: rgba(0, 255, 0, 0.3);
+      box-shadow: 0 0 15px rgba(0, 255, 0, 0.4);
+    }
+
+    .onboarding-btn.secondary {
+      background: transparent;
+      color: rgba(0, 255, 0, 0.6);
+      border-color: rgba(0, 255, 0, 0.3);
+    }
+
+    .onboarding-btn.secondary:hover {
+      background: rgba(0, 255, 0, 0.1);
+      color: #00ff00;
+    }
+
+    .onboarding-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    .onboarding-features {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 15px;
+      margin: 20px 0;
+    }
+
+    .onboarding-feature {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 10px;
+      background: rgba(0, 30, 0, 0.3);
+      border-radius: 4px;
+    }
+
+    .onboarding-feature-icon {
+      font-size: 20px;
+    }
+
+    .onboarding-feature-text h4 {
+      font-size: 12px;
+      color: #00ff00;
+      margin-bottom: 4px;
+    }
+
+    .onboarding-feature-text p {
+      font-size: 11px;
+      color: rgba(0, 255, 0, 0.6);
+      margin: 0;
+    }
+
+    .onboarding-input-group {
+      margin-bottom: 15px;
+    }
+
+    .onboarding-input-group label {
+      display: block;
+      font-size: 12px;
+      color: rgba(0, 255, 0, 0.8);
+      margin-bottom: 6px;
+    }
+
+    .onboarding-input {
+      width: 100%;
+      padding: 10px 12px;
+      background: #000;
+      color: #00ff00;
+      border: 1px solid rgba(0, 255, 0, 0.4);
+      border-radius: 4px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    .onboarding-input:focus {
+      outline: none;
+      border-color: var(--primary-color);
+      box-shadow: 0 0 8px rgba(0, 255, 0, 0.3);
+    }
+
+    .onboarding-input::placeholder {
+      color: rgba(0, 255, 0, 0.3);
+    }
   </style>
 </head>
 
@@ -479,6 +915,7 @@
       <div class="user-management-dropdown">
         <button id="user-menu-btn" class="cyberpunk-button">Settings</button>
         <div id="user-menu-content" class="dropdown-content">
+          <a href="#" id="open-settings-btn">Settings</a>
           <a href="#" id="add-user-btn">Add User</a>
           <a href="#" id="view-users-btn">View Users</a>
           <a href="#" id="manage-sessions-btn">Manage Sessions</a>
@@ -688,18 +1125,450 @@
   </div>
   <!-- END Live Feed Setup Modal -->
 
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal">
+      <div class="modal-content settings-modal-content">
+          <h2>Settings</h2>
+
+          <div class="settings-tabs">
+              <button class="settings-tab active" data-tab="general">General</button>
+              <button class="settings-tab" data-tab="map">Map</button>
+              <button class="settings-tab" data-tab="notifications">Notifications</button>
+              <button class="settings-tab" data-tab="audio">Audio</button>
+              <button class="settings-tab" data-tab="about">About</button>
+          </div>
+
+          <!-- General Tab -->
+          <div id="settings-general" class="settings-section active">
+              <div class="settings-group">
+                  <div class="settings-group-title">Appearance</div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Theme</span>
+                          <span>Choose light or dark mode</span>
+                      </div>
+                      <div class="setting-control">
+                          <select id="setting-theme" class="settings-select">
+                              <option value="dark">Dark</option>
+                              <option value="light">Light</option>
+                              <option value="auto">Auto (System)</option>
+                          </select>
+                      </div>
+                  </div>
+              </div>
+
+              <div class="settings-group">
+                  <div class="settings-group-title">Time Settings</div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Default Time Range</span>
+                          <span>How far back to show calls by default</span>
+                      </div>
+                      <div class="setting-control">
+                          <select id="setting-time-range" class="settings-select">
+                              <option value="1">1 Hour</option>
+                              <option value="3">3 Hours</option>
+                              <option value="6">6 Hours</option>
+                              <option value="12">12 Hours</option>
+                              <option value="24">24 Hours</option>
+                              <option value="48">2 Days</option>
+                              <option value="168">7 Days</option>
+                          </select>
+                      </div>
+                  </div>
+              </div>
+          </div>
+
+          <!-- Map Tab -->
+          <div id="settings-map" class="settings-section">
+              <div class="settings-group">
+                  <div class="settings-group-title">Display</div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Default Map Style</span>
+                          <span>Initial map appearance</span>
+                      </div>
+                      <div class="setting-control">
+                          <select id="setting-map-style" class="settings-select">
+                              <option value="day">Day Mode</option>
+                              <option value="night">Night Mode</option>
+                              <option value="satellite">Satellite</option>
+                          </select>
+                      </div>
+                  </div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Track New Calls</span>
+                          <span>Auto-center map on new call locations</span>
+                      </div>
+                      <div class="setting-control">
+                          <label class="settings-toggle">
+                              <input type="checkbox" id="setting-track-calls" />
+                              <span class="settings-toggle-slider"></span>
+                          </label>
+                      </div>
+                  </div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Heatmap Enabled</span>
+                          <span>Show call density heatmap</span>
+                      </div>
+                      <div class="setting-control">
+                          <label class="settings-toggle">
+                              <input type="checkbox" id="setting-heatmap" />
+                              <span class="settings-toggle-slider"></span>
+                          </label>
+                      </div>
+                  </div>
+                  <div class="setting-row" id="heatmap-intensity-row">
+                      <div class="setting-label">
+                          <span>Heatmap Intensity</span>
+                          <span>Adjust heatmap visibility</span>
+                      </div>
+                      <div class="setting-control">
+                          <input type="range" id="setting-heatmap-intensity" class="settings-range" min="1" max="10" value="5" />
+                      </div>
+                  </div>
+              </div>
+
+              <div class="settings-group">
+                  <div class="settings-group-title">Talkgroup Modal</div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Auto-play Calls</span>
+                          <span>Automatically play audio in talkgroup modal</span>
+                      </div>
+                      <div class="setting-control">
+                          <label class="settings-toggle">
+                              <input type="checkbox" id="setting-autoplay" />
+                              <span class="settings-toggle-slider"></span>
+                          </label>
+                      </div>
+                  </div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Show Talkgroup Modal</span>
+                          <span>Open modal when clicking talkgroup</span>
+                      </div>
+                      <div class="setting-control">
+                          <label class="settings-toggle">
+                              <input type="checkbox" id="setting-show-modal" />
+                              <span class="settings-toggle-slider"></span>
+                          </label>
+                      </div>
+                  </div>
+              </div>
+          </div>
+
+          <!-- Notifications Tab -->
+          <div id="settings-notifications" class="settings-section">
+              <div class="settings-group">
+                  <div class="settings-group-title">Alerts</div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Enable Notifications</span>
+                          <span>Show browser notifications for new calls</span>
+                      </div>
+                      <div class="setting-control">
+                          <label class="settings-toggle">
+                              <input type="checkbox" id="setting-notifications" />
+                              <span class="settings-toggle-slider"></span>
+                          </label>
+                      </div>
+                  </div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Notification Sound</span>
+                          <span>Play sound for new calls</span>
+                      </div>
+                      <div class="setting-control">
+                          <label class="settings-toggle">
+                              <input type="checkbox" id="setting-notification-sound" />
+                              <span class="settings-toggle-slider"></span>
+                          </label>
+                      </div>
+                  </div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Mute New Calls</span>
+                          <span>Temporarily silence new call alerts</span>
+                      </div>
+                      <div class="setting-control">
+                          <label class="settings-toggle">
+                              <input type="checkbox" id="setting-mute-calls" />
+                              <span class="settings-toggle-slider"></span>
+                          </label>
+                      </div>
+                  </div>
+              </div>
+          </div>
+
+          <!-- Audio Tab -->
+          <div id="settings-audio" class="settings-section">
+              <div class="settings-group">
+                  <div class="settings-group-title">Volume</div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Global Volume</span>
+                          <span>Master volume for all audio</span>
+                      </div>
+                      <div class="setting-control">
+                          <input type="range" id="setting-volume" class="settings-range" min="0" max="1" step="0.05" value="0.5" />
+                          <span id="setting-volume-label">50%</span>
+                      </div>
+                  </div>
+              </div>
+
+              <div class="settings-group">
+                  <div class="settings-group-title">Live Feed</div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Enable Live Feed</span>
+                          <span>Show live call feed display</span>
+                      </div>
+                      <div class="setting-control">
+                          <label class="settings-toggle">
+                              <input type="checkbox" id="setting-live-feed" />
+                              <span class="settings-toggle-slider"></span>
+                          </label>
+                      </div>
+                  </div>
+              </div>
+          </div>
+
+          <!-- About Tab -->
+          <div id="settings-about" class="settings-section">
+              <div class="settings-group">
+                  <div class="settings-group-title">Scanner Map</div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Version</span>
+                          <span id="app-version">2.0.0</span>
+                      </div>
+                  </div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Built with</span>
+                          <span>Node.js, Leaflet, Socket.IO</span>
+                      </div>
+                  </div>
+              </div>
+
+              <div class="settings-group">
+                  <div class="settings-group-title">Actions</div>
+                  <div class="setting-row">
+                      <div class="setting-label">
+                          <span>Reset Settings</span>
+                          <span>Restore all settings to defaults</span>
+                      </div>
+                      <div class="setting-control">
+                          <button id="settings-reset-btn" class="onboarding-btn secondary">Reset</button>
+                      </div>
+                  </div>
+              </div>
+          </div>
+
+          <div class="modal-buttons">
+              <button type="button" class="cancel-btn" onclick="closeSettingsModal()">Close</button>
+          </div>
+      </div>
+  </div>
+  <!-- END Settings Modal -->
+
+  <!-- Onboarding Overlay -->
+  <div id="onboarding-overlay" class="onboarding-overlay" style="display: none;">
+      <div class="onboarding-container">
+          <div class="onboarding-header">
+              <h1>Welcome to Scanner Map</h1>
+              <p>Set up your monitoring preferences in just a few steps</p>
+          </div>
+
+          <div class="onboarding-progress">
+              <div class="onboarding-dot active" data-step="1"></div>
+              <div class="onboarding-dot" data-step="2"></div>
+              <div class="onboarding-dot" data-step="3"></div>
+              <div class="onboarding-dot" data-step="4"></div>
+          </div>
+
+          <!-- Step 1: Welcome -->
+          <div id="onboarding-step-1" class="onboarding-step active">
+              <h2>Getting Started</h2>
+              <p>Scanner Map displays real-time radio calls on an interactive map. You'll be able to see calls from police, fire, and other emergency services in your configured area.</p>
+
+              <div class="onboarding-features">
+                  <div class="onboarding-feature">
+                      <div class="onboarding-feature-icon">🗺️</div>
+                      <div class="onboarding-feature-text">
+                          <h4>Live Map</h4>
+                          <p>View calls as they happen on an interactive map</p>
+                      </div>
+                  </div>
+                  <div class="onboarding-feature">
+                      <div class="onboarding-feature-icon">🎙️</div>
+                      <div class="onboarding-feature-text">
+                          <h4>Transcription</h4>
+                          <p>AI-powered speech-to-text for call audio</p>
+                      </div>
+                  </div>
+                  <div class="onboarding-feature">
+                      <div class="onboarding-feature-icon">📍</div>
+                      <div class="onboarding-feature-text">
+                          <h4>Geocoding</h4>
+                          <p>Automatic location extraction from calls</p>
+                      </div>
+                  </div>
+                  <div class="onboarding-feature">
+                      <div class="onboarding-feature-icon">🔔</div>
+                      <div class="onboarding-feature-text">
+                          <h4>Alerts</h4>
+                          <p>Get notified about calls that matter to you</p>
+                      </div>
+                  </div>
+              </div>
+
+              <div class="onboarding-nav">
+                  <div></div>
+                  <button class="onboarding-btn primary" onclick="onboardingNext()">Get Started</button>
+              </div>
+          </div>
+
+          <!-- Step 2: Notifications -->
+          <div id="onboarding-step-2" class="onboarding-step">
+              <h2>Notification Preferences</h2>
+              <p>How would you like to be alerted when new calls come in?</p>
+
+              <div class="onboarding-options">
+                  <div class="onboarding-option selected" data-value="all" onclick="onboardingSelectOption(this, 'notificationLevel')">
+                      <input type="radio" name="notificationLevel" value="all" checked />
+                      <label>
+                          <span class="option-title">All Calls</span>
+                          <span class="option-desc">Show notifications and play sound for every call</span>
+                      </label>
+                  </div>
+                  <div class="onboarding-option" data-value="starred" onclick="onboardingSelectOption(this, 'notificationLevel')">
+                      <input type="radio" name="notificationLevel" value="starred" />
+                      <label>
+                          <span class="option-title">Starred Only</span>
+                          <span class="option-desc">Only notify for starred/favorite talkgroups</span>
+                      </label>
+                  </div>
+                  <div class="onboarding-option" data-value="none" onclick="onboardingSelectOption(this, 'notificationLevel')">
+                      <input type="radio" name="notificationLevel" value="none" />
+                      <label>
+                          <span class="option-title">None</span>
+                          <span class="option-desc">Don't show any notifications</span>
+                      </label>
+                  </div>
+              </div>
+
+              <div class="onboarding-input-group" style="margin-top: 15px;">
+                  <label>
+                      <input type="checkbox" id="onboarding-notification-sound" checked />
+                      Play notification sound
+                  </label>
+              </div>
+
+              <div class="onboarding-nav">
+                  <button class="onboarding-btn secondary" onclick="onboardingPrev()">Back</button>
+                  <button class="onboarding-btn primary" onclick="onboardingNext()">Continue</button>
+              </div>
+          </div>
+
+          <!-- Step 3: Map Preferences -->
+          <div id="onboarding-step-3" class="onboarding-step">
+              <h2>Map Display</h2>
+              <p>Choose your preferred map appearance and behavior.</p>
+
+              <div class="onboarding-options">
+                  <div class="onboarding-option selected" data-value="day" onclick="onboardingSelectOption(this, 'mapStyle')">
+                      <input type="radio" name="mapStyle" value="day" checked />
+                      <label>
+                          <span class="option-title">Day Mode</span>
+                          <span class="option-desc">Standard OpenStreetMap view</span>
+                      </label>
+                  </div>
+                  <div class="onboarding-option" data-value="night" onclick="onboardingSelectOption(this, 'mapStyle')">
+                      <input type="radio" name="mapStyle" value="night" />
+                      <label>
+                          <span class="option-title">Night Mode</span>
+                          <span class="option-desc">Dark theme with reduced glare</span>
+                      </label>
+                  </div>
+                  <div class="onboarding-option" data-value="satellite" onclick="onboardingSelectOption(this, 'mapStyle')">
+                      <input type="radio" name="mapStyle" value="satellite" />
+                      <label>
+                          <span class="option-title">Satellite</span>
+                          <span class="option-desc">Aerial imagery view</span>
+                      </label>
+                  </div>
+              </div>
+
+              <div class="onboarding-input-group" style="margin-top: 15px;">
+                  <label>
+                      <input type="checkbox" id="onboarding-track-calls" checked />
+                      Automatically track new calls on the map
+                  </label>
+              </div>
+
+              <div class="onboarding-input-group">
+                  <label>
+                      <input type="checkbox" id="onboarding-heatmap" />
+                      Enable heatmap to show call density
+                  </label>
+              </div>
+
+              <div class="onboarding-nav">
+                  <button class="onboarding-btn secondary" onclick="onboardingPrev()">Back</button>
+                  <button class="onboarding-btn primary" onclick="onboardingNext()">Continue</button>
+              </div>
+          </div>
+
+          <!-- Step 4: Audio -->
+          <div id="onboarding-step-4" class="onboarding-step">
+              <h2>Audio Settings</h2>
+              <p>Configure audio playback for call recordings.</p>
+
+              <div class="onboarding-input-group">
+                  <label for="onboarding-volume">Default Volume: <span id="onboarding-volume-label">50%</span></label>
+                  <input type="range" id="onboarding-volume" class="onboarding-input" style="width: 100%;" min="0" max="1" step="0.05" value="0.5" oninput="document.getElementById('onboarding-volume-label').textContent = Math.round(this.value * 100) + '%'" />
+              </div>
+
+              <div class="onboarding-input-group">
+                  <label>
+                      <input type="checkbox" id="onboarding-autoplay" checked />
+                      Auto-play call audio when opening talkgroup modal
+                  </label>
+              </div>
+
+              <div class="onboarding-input-group">
+                  <label>
+                      <input type="checkbox" id="onboarding-live-feed" checked />
+                      Show live feed display for selected talkgroups
+                  </label>
+              </div>
+
+              <div class="onboarding-nav">
+                  <button class="onboarding-btn secondary" onclick="onboardingPrev()">Back</button>
+                  <button class="onboarding-btn primary" onclick="onboardingComplete()">Complete Setup</button>
+              </div>
+          </div>
+      </div>
+  </div>
+
   <!-- NEW: Live Feed Display Area -->
   <div id="live-feed-display">
   </div>
   <!-- END Live Feed Display Area -->
 
   <script src="config.js"></script>
+  <script src="config-manager.js"></script>
+  <script src="js/live-feed.js" defer></script>
   <script src="app.js" defer></script>
+  <script src="js/settings.js" defer></script>
 
   <script>
-    // Function to initialize Google Maps
+    // Google Maps loader — kept inline because it dynamically injects the API script
     async function initGoogleMaps() {
-      // Wait for the API key to be fetched
       await new Promise((resolve) => {
         const checkKey = () => {
           if (window?.appConfig?.geocoding?.googleApiKey) {
@@ -730,19 +1599,9 @@
       }
     }
 
-    // Start Google Maps loading
     initGoogleMaps().catch(error => {
         console.error('Failed to initialize Google Maps API:', error);
-        // Application can potentially continue without maps features, or show an error
     });
-
-    // Placeholder function to close the new modal (will be defined in app.js)
-    function closeLiveFeedModal() {
-      const modal = document.getElementById('live-feed-modal');
-      if (modal) {
-          modal.style.display = 'none';
-      }
-    }
   </script>
 </body>
 </html>

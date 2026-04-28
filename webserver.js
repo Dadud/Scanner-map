@@ -102,7 +102,7 @@ app.get('/api/auth/is-admin', async (req, res) => {
   if (!authEnabled) {
     return res.json({ isAdmin: false, authEnabled: false });
   }
-  
+
   const authHeader = req.headers['authorization'];
   const adminStatus = await isAdminUser(authHeader);
   res.json({ isAdmin: adminStatus, authEnabled: true });
@@ -118,13 +118,13 @@ let s3 = null;
 if (STORAGE_MODE === 's3') {
   if (!S3_ENDPOINT || !S3_BUCKET_NAME || !S3_ACCESS_KEY_ID || !S3_SECRET_ACCESS_KEY) {
     console.error('FATAL: STORAGE_MODE is s3, but required S3 environment variables are missing! Check webserver .env');
-    process.exit(1); // Exit if S3 config is incomplete
+    process.exit(1);
   }
   AWS.config.update({
     accessKeyId: S3_ACCESS_KEY_ID,
     secretAccessKey: S3_SECRET_ACCESS_KEY,
     endpoint: S3_ENDPOINT,
-    s3ForcePathStyle: true, // Necessary for MinIO/non-AWS S3
+    s3ForcePathStyle: true,
     signatureVersion: 'v4'
   });
   s3 = new AWS.S3();
@@ -135,6 +135,151 @@ if (STORAGE_MODE === 's3') {
 
 // Authentication is enabled if ENABLE_AUTH=true
 const authEnabled = ENABLE_AUTH?.toLowerCase() === 'true';
+
+// --- USER SETTINGS API ---
+const DEFAULT_USER_SETTINGS = {
+  mapStyle: 'day',
+  defaultTimeRange: 12,
+  notificationsEnabled: true,
+  notificationSound: true,
+  trackNewCalls: true,
+  muteNewCalls: false,
+  globalVolume: 0.5,
+  heatmapEnabled: false,
+  heatmapIntensity: 5,
+  liveFeedTalkgroups: [],
+  autoPlay: true,
+  onboardingComplete: false
+};
+
+function getUserIdFromReq(req) {
+  if (!authEnabled) {
+    return null;
+  }
+  return req.user?.id || null;
+}
+
+async function getUserSettings(userId) {
+  return new Promise((resolve, reject) => {
+    if (userId === null) {
+      return resolve(DEFAULT_USER_SETTINGS);
+    }
+    db.get('SELECT settings_json FROM user_settings WHERE user_id = ?', [userId], (err, row) => {
+      if (err) return reject(err);
+      if (!row) {
+        return resolve(DEFAULT_USER_SETTINGS);
+      }
+      try {
+        const settings = JSON.parse(row.settings_json);
+        resolve({ ...DEFAULT_USER_SETTINGS, ...settings });
+      } catch (e) {
+        resolve(DEFAULT_USER_SETTINGS);
+      }
+    });
+  });
+}
+
+async function saveUserSettings(userId, settings) {
+  return new Promise((resolve, reject) => {
+    if (userId === null) {
+      return resolve({ success: true });
+    }
+    const settingsJson = JSON.stringify(settings);
+    db.run(
+      `INSERT INTO user_settings (user_id, settings_json, updated_at)
+       VALUES (?, ?, datetime('now'))
+       ON CONFLICT(user_id) DO UPDATE SET
+       settings_json = excluded.settings_json,
+       updated_at = datetime('now')`,
+      [userId, settingsJson],
+      function(err) {
+        if (err) return reject(err);
+        resolve({ success: true });
+      }
+    );
+  });
+}
+
+app.get('/api/settings', async (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    const settings = await getUserSettings(userId);
+    res.json({ success: true, settings });
+  } catch (error) {
+    console.error('Error fetching settings:', error);
+    res.status(500).json({ success: false, error: 'Failed to fetch settings' });
+  }
+});
+
+app.post('/api/settings', async (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    if (userId === null) {
+      return res.status(401).json({ success: false, error: 'Authentication required', anonymous: true });
+    }
+    const updates = req.body;
+    if (!updates || typeof updates !== 'object') {
+      return res.status(400).json({ success: false, error: 'Invalid settings data' });
+    }
+    const currentSettings = await getUserSettings(userId);
+    const mergedSettings = { ...currentSettings, ...updates };
+    await saveUserSettings(userId, mergedSettings);
+    res.json({ success: true, settings: mergedSettings });
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    res.status(500).json({ success: false, error: 'Failed to save settings' });
+  }
+});
+
+app.post('/api/settings/reset', async (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    if (userId === null) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    await saveUserSettings(userId, DEFAULT_USER_SETTINGS);
+    res.json({ success: true, settings: DEFAULT_USER_SETTINGS });
+  } catch (error) {
+    console.error('Error resetting settings:', error);
+    res.status(500).json({ success: false, error: 'Failed to reset settings' });
+  }
+});
+
+app.get('/api/onboarding/status', async (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    if (userId === null) {
+      return res.json({ needsOnboarding: false, authEnabled: false });
+    }
+    const settings = await getUserSettings(userId);
+    res.json({
+      needsOnboarding: !settings.onboardingComplete,
+      authEnabled: true,
+      settings
+    });
+  } catch (error) {
+    console.error('Error checking onboarding status:', error);
+    res.status(500).json({ success: false, error: 'Failed to check onboarding status' });
+  }
+});
+
+app.post('/api/onboarding/complete', async (req, res) => {
+  try {
+    const userId = getUserIdFromReq(req);
+    if (userId === null) {
+      return res.status(401).json({ success: false, error: 'Authentication required' });
+    }
+    const currentSettings = await getUserSettings(userId);
+    const updatedSettings = { ...currentSettings, onboardingComplete: true, ...req.body };
+    await saveUserSettings(userId, updatedSettings);
+    res.json({ success: true, settings: updatedSettings });
+  } catch (error) {
+    console.error('Error completing onboarding:', error);
+    res.status(500).json({ success: false, error: 'Failed to complete onboarding' });
+  }
+});
+
+// --- END USER SETTINGS API ---
 
 // Session configuration (used only if auth is enabled)
 const SESSION_DURATION = parseInt(SESSION_DURATION_DAYS, 10) * 24 * 60 * 60 * 1000; // Convert days to milliseconds
@@ -151,13 +296,19 @@ const db = new sqlite3.Database('./botdata.db', sqlite3.OPEN_READWRITE, (err) =>
     console.error('Error opening database', err.message);
   } else {
     console.log('Connected to the SQLite database.');
+    // Enable WAL mode for safer concurrent access from bot.js
+    db.run('PRAGMA journal_mode = WAL;');
+    db.run('PRAGMA busy_timeout = 5000;');
   }
 });
 
 db.run(`ALTER TABLE transcriptions ADD COLUMN category TEXT`, err => {
-  // Ignore error if column already exists
-  if (!err || err.message.includes('duplicate column name')) {
-    console.log('Category column exists or was created successfully');
+  if (!err) {
+    console.log('Category column added successfully');
+  } else if (err.message.includes('duplicate column name')) {
+    console.log('Category column already exists');
+  } else {
+    console.error('Error adding category column:', err.message);
   }
 });
 
@@ -186,6 +337,18 @@ if (authEnabled) {
         last_activity DATETIME DEFAULT CURRENT_TIMESTAMP,
         ip_address TEXT,
         user_agent TEXT,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+
+    // User settings table (stores UI preferences per user)
+    db.run(`
+      CREATE TABLE IF NOT EXISTS user_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER UNIQUE NOT NULL,
+        settings_json TEXT NOT NULL DEFAULT '{}',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
@@ -524,7 +687,7 @@ const basicAuth = async (req, res, next) => {
 };
 
 // Admin Authentication Middleware
-const adminAuth = (req, res, next) => {
+const adminAuth = async (req, res, next) => {
   // Skip authentication if disabled in .env
   if (!authEnabled) {
     return next();
@@ -535,14 +698,16 @@ const adminAuth = (req, res, next) => {
     return res.status(401).send('Admin authentication required.');
   }
 
-  const base64Credentials = authHeader.split(' ')[1];
-  const credentials = Buffer.from(base64Credentials, 'base64').toString('ascii');
-  const [username, password] = credentials.split(':');
-
-  if (username === 'admin' && password === WEBSERVER_PASSWORD) {
-    next();
-  } else {
-    return res.status(401).send('Invalid admin credentials.');
+  try {
+    const isAdmin = await isAdminUser(authHeader);
+    if (isAdmin) {
+      next();
+    } else {
+      return res.status(401).send('Invalid admin credentials.');
+    }
+  } catch (error) {
+    console.error('Error in adminAuth:', error);
+    return res.status(500).send('Authentication error.');
   }
 };
 
@@ -961,6 +1126,11 @@ app.put('/api/markers/:id/location', (req, res) => {
     return res.status(400).json({ error: 'Invalid parameters' });
   }
 
+  // Validate coordinate ranges
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return res.status(400).json({ error: 'Coordinates out of valid range' });
+  }
+
   db.run(
     'UPDATE transcriptions SET lat = ?, lon = ? WHERE id = ?',
     [lat, lon, markerId],
@@ -1146,6 +1316,28 @@ function initializeLastLiveFeedCallId() {
 }
 
 
+// Async background categorization — does not block polling
+async function categorizeCallAsync(row) {
+  try {
+    const category = await generateShortSummary(row.transcription);
+    if (category) {
+      await new Promise((resolve, reject) => {
+        db.run(
+          `UPDATE transcriptions SET category = ? WHERE id = ?`,
+          [category, row.id],
+          function(dbErr) {
+            if (dbErr) reject(dbErr);
+            else resolve();
+          }
+        );
+      });
+      io.emit('callUpdated', { id: row.id, category });
+    }
+  } catch (categoryError) {
+    console.error(`Error generating category for map call ID ${row.id}:`, categoryError);
+  }
+}
+
 // Polling function for MAP updates (requires lat/lon)
 function checkForNewCalls() {
   db.all(
@@ -1159,10 +1351,10 @@ function checkForNewCalls() {
       AND t.lat BETWEEN -90 AND 90 
       AND t.lon BETWEEN -180 AND 180
     ORDER BY t.id ASC
-    LIMIT 10 -- Limit to prevent flooding
+    LIMIT 10
     `,
     [lastCallId],
-    async (err, rows) => {
+    (err, rows) => {
       if (err) {
         console.error('Error checking for new map calls:', err.message);
         return;
@@ -1172,60 +1364,25 @@ function checkForNewCalls() {
       if (rows && rows.length > 0) {
           for (const row of rows) {
               if (row.id > updatedLastId) {
-                  updatedLastId = row.id; // Track highest ID fetched
+                  updatedLastId = row.id;
               }
 
-              // --- Process Category --- 
+              // Decoupled: categorize asynchronously without blocking emission
               if (!row.category && row.transcription) {
-                  try {
-                      const category = await generateShortSummary(row.transcription);
-                      if (category) {
-                          console.log(`Generated category for map call ID ${row.id}: "${category}"`);
-                          await new Promise((resolve, reject) => {
-                              db.run(
-                                  `UPDATE transcriptions SET category = ? WHERE id = ?`,
-                                  [category, row.id],
-                                  function(dbErr) {
-                                      if (dbErr) reject(dbErr);
-                                      else resolve();
-                                  }
-                              );
-                          });
-                          row.category = category;
-                      }
-                  } catch (categoryError) {
-                      console.error(`Error generating category for map call ID ${row.id}:`, categoryError);
-                  }
+                categorizeCallAsync(row);
               }
-              // --- End Category Processing ---
 
-              // Timestamp from DB is now Unix seconds
-              // const numericTimestamp = Math.floor(new Date(row.timestamp).getTime() / 1000);
-              // if (isNaN(numericTimestamp)) {
-              //  console.error(`Invalid timestamp in polling (newCall): ${row.timestamp} for call ID ${row.id}`);
-              //  continue; // Skip this row
-              // }
-              // const processedRow = { ...row, timestamp: numericTimestamp };
-
-              // --- Emission Logic with Timeout --- 
+              // Emission Logic with Timeout
               if (row.transcription) {
-                   // Has transcription, emit immediately
-                  io.emit('newCall', row); // row.timestamp is already Unix seconds
+                  io.emit('newCall', row);
               } else {
-                  // No transcription yet, check age
-                  // row.timestamp is Unix seconds, multiply by 1000 for JS Date
                   const callAgeMs = Date.now() - (row.timestamp * 1000);
-                  if (callAgeMs > 10000) { // 10 second timeout
-                      // Timeout exceeded, emit with placeholder
+                  if (callAgeMs > 10000) {
                       const rowWithPlaceholder = { ...row, transcription: "[Transcription Pending...]" };
                       io.emit('newCall', rowWithPlaceholder);
-                  } else {
-                      // Too new and no transcription, wait 
                   }
               }
-              // --- End Emission Logic ---
           }
-          // Update state variable *after* processing batch with highest ID *fetched*
           if (updatedLastId > lastCallId) {
               lastCallId = updatedLastId;
           }
@@ -1239,13 +1396,13 @@ function checkForLiveFeedCalls() {
   db.all(
     `
     SELECT t.id, t.talk_group_id, t.transcription, t.timestamp,
-           t.audio_file_path, -- Added audio_file_path for potential use
+           t.audio_file_path,
            tg.alpha_tag AS talk_group_name
     FROM transcriptions t
     LEFT JOIN talk_groups tg ON t.talk_group_id = tg.id
     WHERE t.id > ? 
     ORDER BY t.id ASC
-    LIMIT 10 -- Limit to prevent flooding
+    LIMIT 10
     `,
     [lastLiveFeedCallId],
     (err, rows) => {
@@ -1254,52 +1411,29 @@ function checkForLiveFeedCalls() {
         return;
       }
       
-      let highestEmittedId = lastLiveFeedCallId; // Track the highest ID we ACTUALLY emit
+      let highestEmittedId = lastLiveFeedCallId;
 
       if (rows && rows.length > 0) {
           rows.forEach(row => {
-              // Timestamp from DB is now Unix seconds
-              // const numericTimestamp = Math.floor(new Date(row.timestamp).getTime() / 1000);
-              // if (isNaN(numericTimestamp)) {
-              //  console.error(`Invalid timestamp in polling (liveFeedUpdate): ${row.timestamp} for call ID ${row.id}`);
-              //  return; // Skip this iteration of forEach
-              // }
-              // const processedRow = { ...row, timestamp: numericTimestamp };
-
               let shouldEmit = false;
-              // --- Emission Logic with Timeout ---
               if (row.transcription) {
-                   // Has transcription, emit immediately
                    shouldEmit = true;
               } else {
-                   // No transcription yet, check age
-                   // row.timestamp is Unix seconds, multiply by 1000 for JS Date
                   const callAgeMs = Date.now() - (row.timestamp * 1000);
-                  if (callAgeMs > 10000) { // 10 second timeout
-                      // Timeout exceeded, emit with placeholder
-                      // Create a new object for the row with placeholder to avoid modifying original row in loop
-                      // const rowWithPlaceholder = { ...row, transcription: "[Transcription Pending...]" };
-                      // io.emit('liveFeedUpdate', rowWithPlaceholder);
-                      // shouldEmit = true; // This was incorrect, emission is handled below
-                      row.transcription = "[Transcription Pending...]"; // Modify row for this emission
+                  if (callAgeMs > 10000) {
+                      row.transcription = "[Transcription Pending...]";
                       shouldEmit = true;
-                  } else {
-                      // Too new and no transcription, wait (DO NOTHING)
                   }
               }
-              // --- End Emission Logic ---
               
-              // Emit only if decided
               if (shouldEmit) {
-                 io.emit('liveFeedUpdate', row); // row.timestamp is already Unix seconds
-                 // Update highestEmittedId only when we actually emit
+                 io.emit('liveFeedUpdate', row);
                  if (row.id > highestEmittedId) {
                     highestEmittedId = row.id;
                  }
               }
           });
 
-          // Update state variable *after* processing batch using the highest EMITTED ID
           if (highestEmittedId > lastLiveFeedCallId) {
               lastLiveFeedCallId = highestEmittedId;
           }
@@ -1308,11 +1442,29 @@ function checkForLiveFeedCalls() {
   );
 }
 
-// Initialize last IDs and start polling intervals
+// Recursive scheduling to prevent overlapping poll executions
+let mapPollTimer = null;
+let feedPollTimer = null;
+
+function scheduleMapPoll() {
+  mapPollTimer = setTimeout(() => {
+    checkForNewCalls();
+    scheduleMapPoll();
+  }, 2000);
+}
+
+function scheduleFeedPoll() {
+  feedPollTimer = setTimeout(() => {
+    checkForLiveFeedCalls();
+    scheduleFeedPoll();
+  }, 2500);
+}
+
+// Initialize last IDs and start polling
 initializeLastCallId();
 initializeLastLiveFeedCallId();
-setInterval(checkForNewCalls, 2000); // Poll for map updates every 2s
-setInterval(checkForLiveFeedCalls, 2500); // Poll for live feed slightly offset, every 2.5s
+scheduleMapPoll();
+scheduleFeedPoll();
 
 // --- End Polling Logic ---
 
@@ -1720,13 +1872,6 @@ app.post('/api/calls/undo-last-purge', async (req, res) => {
 
     const whereClause = whereConditions.join(' AND ');
 
-    // Execute the restore query
-    const restoreQuery = `UPDATE transcriptions SET lat = (SELECT lat FROM transcriptions_backup WHERE id = transcriptions.id), lon = (SELECT lon FROM transcriptions_backup WHERE id = transcriptions.id) WHERE ${whereClause}`;
-    
-    // Since we don't have a backup table, we'll need to restore from the original coordinates
-    // For now, we'll use a different approach - restore based on the original query
-    const restoreQuery2 = `UPDATE transcriptions SET lat = (SELECT lat FROM transcriptions WHERE id = transcriptions.id), lon = (SELECT lon FROM transcriptions WHERE id = transcriptions.id) WHERE ${whereClause}`;
-    
     // Check if database is available
     if (!db) {
       console.error('[Undo Purge] Database not available');

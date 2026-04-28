@@ -928,7 +928,7 @@ function ensureApiKey() {
         
         fs.writeFileSync(API_KEY_FILE, JSON.stringify(initialApiKeys, null, 2));
         
-        logger.info(`Created default API key: ${defaultKey}`);
+        logger.info(`Created default API key (ID: ${initialApiKeys[0].id})`);
         logger.info(`API key saved to: ${API_KEY_FILE}`);
         logger.warn('IMPORTANT: Save this API key as it won\'t be shown again!');
         resolve(defaultKey);
@@ -1028,6 +1028,23 @@ function initializeDatabase() {
           FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )`, (err) => tableCreated(err, 'sessions'));
       }
+
+      // Create indexes for commonly queried columns
+      db.run(`CREATE INDEX IF NOT EXISTS idx_transcriptions_timestamp ON transcriptions(timestamp)`, (err) => {
+        if (err) logger.warn('Error creating timestamp index:', err.message);
+      });
+      db.run(`CREATE INDEX IF NOT EXISTS idx_transcriptions_coords ON transcriptions(lat, lon) WHERE lat IS NOT NULL`, (err) => {
+        if (err) logger.warn('Error creating coords index:', err.message);
+      });
+      db.run(`CREATE INDEX IF NOT EXISTS idx_transcriptions_talkgroup ON transcriptions(talk_group_id)`, (err) => {
+        if (err) logger.warn('Error creating talkgroup index:', err.message);
+      });
+      db.run(`CREATE INDEX IF NOT EXISTS idx_transcriptions_category ON transcriptions(category)`, (err) => {
+        if (err) logger.warn('Error creating category index:', err.message);
+      });
+      db.run(`CREATE INDEX IF NOT EXISTS idx_audio_transcription ON audio_files(transcription_id)`, (err) => {
+        if (err) logger.warn('Error creating audio index:', err.message);
+      });
     });
   });
 }
@@ -1076,7 +1093,7 @@ function createAdminUser() {
             reject(err);
           } else {
             logger.info('Created admin user for webserver authentication.');
-            logger.info(`Admin credentials: username=admin, password=${WEBSERVER_PASSWORD}`);
+            logger.info('Created admin user for webserver authentication.');
             resolve();
           }
         }
@@ -1121,8 +1138,7 @@ async function initializeBot() {
     if (newApiKey) {
       // Log the new API key one more time for visibility
       console.log('='.repeat(60));
-      console.log('NEW API KEY GENERATED:');
-      console.log(newApiKey);
+      console.log('NEW API KEY GENERATED');
       console.log('Please save this key - it will not be shown again!');
       console.log('='.repeat(60));
     }
@@ -1217,8 +1233,6 @@ const client = new Client({
 let alertChannel;
 const UPLOAD_DIR = path.join(__dirname, 'audio');
 let transcriptionQueue = [];
-let activeTranscriptions = 0;
-let isBootComplete = false;
 const messageCache = new Map(); // Stores the latest message for each channel
 const MESSAGE_COOLDOWN = 15000; // 15 seconds in milliseconds
 let transcriptionProcess = null;
@@ -1245,6 +1259,9 @@ const db = new sqlite3.Database('./botdata.db', (err) => {
     process.exit(1);
   } else {
     logger.info('Connected to SQLite database.');
+    // Enable WAL mode for safer concurrent access from webserver.js
+    db.run('PRAGMA journal_mode = WAL;');
+    db.run('PRAGMA busy_timeout = 5000;');
     // Trigger initialization after database connection
     initializeBot().catch((error) => {
       logger.error('Fatal error during bot initialization:', error);
@@ -3577,8 +3594,7 @@ function transcribeAudio(filePath, callback) {
     id: requestId,
     path: filePath,
     callback: processCallback,  // Use the wrapper callback
-    retries: 0,    // Track retry attempts
-    maxRetries: 2  // Maximum number of retries
+    // retry tracking removed (was unused)
   });
   
   // Try to process
@@ -5550,8 +5566,6 @@ function getOrCreateChannel(channelName, categoryId, callback) {
 
 // Voice channel and audio playback management
 const activeVoiceChannels = new Map();
-const audioFilesInUse = new Set();
-
 function playAudioForTalkGroup(talkGroupID, transcriptionId) {
   talkGroupID = talkGroupID.toString();
   const talkGroupData = activeVoiceChannels.get(talkGroupID);
@@ -5659,13 +5673,6 @@ function deleteAudioFile(transcriptionId) {
       logger.info(`Deleted audio data for transcription ID ${transcriptionId}`);
     }
   });
-}
-
-function markAudioFileAsNotNeeded(transcriptionId) {
-  audioFilesInUse.delete(transcriptionId);
-  if (!audioFilesInUse.has(transcriptionId)) {
-    deleteAudioFile(transcriptionId);
-  }
 }
 
 async function handleListenLive(interaction, talkGroupID) {
@@ -5859,12 +5866,6 @@ function cleanupVoiceChannel(talkGroupID) {
     }
   }
 
-  if (queue && queue.length > 0) {
-    queue.forEach((transcriptionId) => {
-      markAudioFileAsNotNeeded(transcriptionId);
-    });
-  }
-
   if (voiceChannel) {
     voiceChannel
       .delete()
@@ -5981,7 +5982,6 @@ client.once('ready', async () => {
     logger.info(`Transcription mode set to '${effectiveTranscriptionMode}'. Local Python process will not be started.`);
   }
   
-  isBootComplete = true;
 });
 
 client.on('interactionCreate', async (interaction) => {

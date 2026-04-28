@@ -46,29 +46,6 @@ let globalVolumeLevel = 0.5; // Default to 50% volume
 // NEW: Variable to store original mute state
 let originalMuteStateBeforeModal = false;
 
-// --- Live Feed State Variables ---
-let liveFeedSelectedTalkgroups = new Set(); // Stores IDs of selected talkgroups
-// REMOVED: let isLiveFeedEnabled = false;
-let isLiveFeedAudioEnabled = false;
-let allLiveFeedTalkgroups = []; // Cache for the full talkgroup list
-const MAX_LIVE_FEED_ITEMS = 5;
-const LIVE_FEED_ITEM_DURATION = 15000; // 15 seconds in milliseconds
-const LIVE_FEED_RETRY_INTERVAL = 3000; // 3 seconds for retry
-const MAX_LIVE_FEED_RETRIES = 5; // Max 5 retries (total 15 seconds)
-
-// Performance optimization variables
-let liveFeedSearchDebounceTimer = null;
-const LIVE_FEED_SEARCH_DEBOUNCE_DELAY = 300; // 300ms debounce
-const MAX_TALKGROUPS_DISPLAY = 100; // Limit displayed talkgroups for performance
-
-// Add references for the UI elements that will be assigned in setupLiveFeed
-// REMOVED liveFeedEnableCheckbox
-let liveFeedModal, liveFeedSetupBtn, liveFeedSearchInput, liveFeedAudioEnableCheckbox, liveFeedTalkgroupListContainer, liveFeedDisplayContainer;
-
-// Declare the audio source variable globally if it doesn't exist elsewhere
-let currentAudioSource = null;
-// --- End Live Feed State Variables ---
-
 // MOVED TO TOP: initGlobalGainNode definition
 function initGlobalGainNode() {
     console.log("[VOLUME] Initializing global gain node...");
@@ -126,6 +103,20 @@ function updateSliderFill(slider) {
     } catch (error) {
         console.error("[VOLUME] Error updating slider fill:", error);
     }
+}
+
+// XSS-safe HTML escape helper
+function escapeHtml(str) {
+    if (typeof str !== 'string') return str;
+    return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// Safe fetch helper that rejects on non-2xx status
+function safeFetchJson(url, options) {
+    return fetch(url, options).then(r => {
+        if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + r.statusText);
+        return r.json();
+    });
 }
 
 // Uses uppercase keys consistent with how they're stored in the DB via webserver.js
@@ -603,10 +594,24 @@ function updateCategoryCounts() {
     // 3. Sort categories alphabetically
     categoriesToShow.sort((a, b) => a.name.localeCompare(b.name));
 
-    // 4. Rebuild the category list (excluding 'ALL' for now)
-    categoryList.innerHTML = ''; // Clear previous category-specific items
+    // 4. Rebuild the category list using DocumentFragment for fewer reflows
+    const fragment = document.createDocumentFragment();
 
-    // 5. Add sorted categories with counts > 0
+    // 5. Handle the "ALL" category first
+    const allCategoryItem = document.createElement('div');
+    allCategoryItem.className = 'category-item';
+    allCategoryItem.dataset.category = 'ALL';
+    allCategoryItem.innerHTML = `
+        <div class="category-name">ALL</div>
+        <div class="category-count">${totalVisible}</div>
+    `;
+    if (!selectedCategory) {
+        allCategoryItem.classList.add('active');
+    }
+    allCategoryItem.addEventListener('click', () => toggleCategoryFilter('ALL'));
+    fragment.appendChild(allCategoryItem);
+
+    // 6. Add sorted categories with counts > 0
     categoriesToShow.forEach(catInfo => {
         const categoryItem = document.createElement('div');
         categoryItem.className = 'category-item';
@@ -616,37 +621,16 @@ function updateCategoryCounts() {
             <div class="category-count">${catInfo.count}</div>
         `;
 
-        // Highlight if it's the currently selected category
         if (selectedCategory === catInfo.name) {
             categoryItem.classList.add('active');
         }
 
-        categoryItem.addEventListener('click', () => {
-            // Pass the actual category name to the filter function
-            toggleCategoryFilter(catInfo.name);
-        });
-
-        categoryList.appendChild(categoryItem);
+        categoryItem.addEventListener('click', () => toggleCategoryFilter(catInfo.name));
+        fragment.appendChild(categoryItem);
     });
 
-    // 6. Handle the "ALL" category
-    const allCategoryItem = document.createElement('div');
-    allCategoryItem.className = 'category-item';
-    allCategoryItem.dataset.category = 'ALL';
-    allCategoryItem.innerHTML = `
-        <div class="category-name">ALL</div>
-        <div class="category-count">${totalVisible}</div>
-    `;
-    // Set 'ALL' as active if no specific category is selected
-    if (!selectedCategory) {
-        allCategoryItem.classList.add('active');
-    }
-    allCategoryItem.addEventListener('click', () => {
-        toggleCategoryFilter('ALL');
-    });
-
-    // Add 'ALL' to the top
-    categoryList.prepend(allCategoryItem);
+    categoryList.innerHTML = '';
+    categoryList.appendChild(fragment);
 
     // 7. Check if the currently selected category is still visible
     if (selectedCategory && currentCounts[selectedCategory] === 0) {
@@ -921,7 +905,6 @@ function initMap() {
 
     setupEventListeners();
     L.control.scale().addTo(map);
-    loadCalls(timeRangeHours);
 
     map.on('zoomend', function() {
         console.log('Current zoom level:', map.getZoom());
@@ -953,24 +936,37 @@ function setupEventListeners() {
 // Toggle Map Mode (Day, Night, Satellite)
 function toggleMapMode() {
     if (currentMapMode === 'day') {
-        map.removeLayer(dayLayer);
-        nightLayer.addTo(map);
-        currentMapMode = 'night';
-        // Use direct text assignment
-        toggleModeButton.textContent = 'Night';
+        setMapMode('night');
     } else if (currentMapMode === 'night') {
-        map.removeLayer(nightLayer);
-        satelliteLayer.addTo(map);
-        currentMapMode = 'satellite';
-        // Use direct text assignment
-        toggleModeButton.textContent = 'Satellite';
+        setMapMode('satellite');
     } else if (currentMapMode === 'satellite') {
-        map.removeLayer(satelliteLayer);
-        dayLayer.addTo(map);
-        currentMapMode = 'day';
-        // Use direct text assignment
-        toggleModeButton.textContent = 'Day';
+        setMapMode('day');
     }
+}
+
+// Directly set map mode without cycling — used by settings restore
+function setMapMode(mode) {
+    if (!map || !toggleModeButton) return;
+    if (mode === currentMapMode) return;
+
+    // Remove current layer
+    if (currentMapMode === 'day') map.removeLayer(dayLayer);
+    else if (currentMapMode === 'night') map.removeLayer(nightLayer);
+    else if (currentMapMode === 'satellite') map.removeLayer(satelliteLayer);
+
+    // Add new layer
+    if (mode === 'day') {
+        dayLayer.addTo(map);
+        toggleModeButton.textContent = 'Day';
+    } else if (mode === 'night') {
+        nightLayer.addTo(map);
+        toggleModeButton.textContent = 'Night';
+    } else if (mode === 'satellite') {
+        satelliteLayer.addTo(map);
+        toggleModeButton.textContent = 'Satellite';
+    }
+
+    currentMapMode = mode;
 }
 
 // Setup Calls and Socket.IO Updates
@@ -980,11 +976,23 @@ function setupCallsAndUpdates() {
 }
 
 // Initialize Socket.IO
+let pingIntervalId = null;
+
 function initializeSocketIO() {
+    if (socket) {
+        console.log('[Socket.IO] Already initialized, skipping.');
+        return;
+    }
     socket = io();
 
     socket.on('connect', () => console.log('Connected to Socket.IO server.'));
-    socket.on('disconnect', () => console.log('Disconnected from Socket.IO server.'));
+    socket.on('disconnect', () => {
+        console.log('Disconnected from Socket.IO server.');
+        if (pingIntervalId) {
+            clearInterval(pingIntervalId);
+            pingIntervalId = null;
+        }
+    });
 
     /* // RE-ENABLED DEBUG LISTENER -> COMMENTING OUT AGAIN
     socket.onAny((eventName, ...args) => {
@@ -992,11 +1000,14 @@ function initializeSocketIO() {
     });
     */
 
-    // Listener for map updates (Keep as is)
+    // Listener for map updates
     socket.on('newCall', handleNewCall);
     
-    // Restore direct Listener for live feed updates
-    socket.on('liveFeedUpdate', handleLiveFeedUpdate); 
+    // Listener for live feed updates
+    socket.on('liveFeedUpdate', handleLiveFeedUpdate);
+    
+    // Listener for background category updates
+    socket.on('callUpdated', handleCallUpdated);
     
     socket.on('error', (error) => console.error('Socket.IO Error:', error));
     socket.on('serverMessage', (message) => console.log('Server message:', message));
@@ -1006,8 +1017,9 @@ function initializeSocketIO() {
     socket.io.on('reconnect', handleReconnect);
     socket.io.on('reconnect_error', (error) => console.error('Failed to reconnect to Socket.IO server:', error));
 
-    setInterval(() => {
-        if (socket.connected) socket.emit('ping');
+    if (pingIntervalId) clearInterval(pingIntervalId);
+    pingIntervalId = setInterval(() => {
+        if (socket && socket.connected) socket.emit('ping');
     }, 30000);
 }
 
@@ -1015,6 +1027,18 @@ function initializeSocketIO() {
 function handleReconnect() {
     console.log('Reconnected to Socket.IO server.');
     // If there were any actions to re-establish after reconnect, handle them here
+}
+
+// Handle background category update from server
+function handleCallUpdated(update) {
+    if (!update || !update.id) return;
+    // Update marker data if present
+    if (allMarkers[update.id]) {
+        allMarkers[update.id].category = update.category;
+        // If popup is open, refresh it (optional — Leaflet popups don't auto-update)
+    }
+    // Update category counts in sidebar
+    updateCategoryCounts();
 }
 
 // Handle New Call Event
@@ -1184,15 +1208,15 @@ function addMarker(call, isNew = false) {
         let mainContentHTML = '';
         
         // Add talk group name
-        mainContentHTML += `<b>${call.talk_group_name || 'Unknown Talk Group'}</b>`;
+        mainContentHTML += `<b>${escapeHtml(call.talk_group_name) || 'Unknown Talk Group'}</b>`;
         
         // Add category with blue theme styling if it exists
         if (call.category) {
-            mainContentHTML += `<span class="category-badge">${call.category}</span>`; // Use class for styling
+            mainContentHTML += `<span class="category-badge">${escapeHtml(call.category)}</span>`; // Use class for styling
         }
         
         // Add transcription and audio controls
-        mainContentHTML += `<br>${call.transcription || 'No transcription available.'}<br>
+        mainContentHTML += `<br>${escapeHtml(call.transcription) || 'No transcription available.'}<br>
             <div id="waveform-${call.id}" class="waveform"></div>
             <div class="audio-controls">
                 <button class="play-pause" data-call-id="${call.id}" aria-label="Play audio for call ${call.id}">Play</button>
@@ -1201,7 +1225,7 @@ function addMarker(call, isNew = false) {
                     <input type="checkbox" id="popup-live-feed-toggle-${call.id}" class="popup-live-feed-toggle" data-tg-id="${call.talk_group_id}">
                     <label for="popup-live-feed-toggle-${call.id}">Add to Live Feed</label> <!-- Changed Label Text -->
                 </div>
-                <button class="talkgroup-history-btn" data-talkgroup-id="${call.talk_group_id}" data-call-id="${call.id}" data-talkgroup-name="${call.talk_group_name || 'Unknown Talk Group'}">More Info</button>
+                <button class="talkgroup-history-btn" data-talkgroup-id="${call.talk_group_id}" data-call-id="${call.id}" data-talkgroup-name="${escapeHtml(call.talk_group_name) || 'Unknown Talk Group'}">More Info</button>
                 <!-- REMOVED: <input type="range" class="volume" min="0" max="1" step="0.1" value="1" data-call-id="${call.id}" aria-label="Volume control for call ${call.id}"> -->
             </div>
             <!-- REMOVED: <div class="additional-info"></div> -->
@@ -2533,8 +2557,7 @@ function loadCalls(hours) {
     console.log(`[DEBUG] loadCalls started with hours: ${hours}`);
     console.log(`[DEBUG] Current allMarkers count before fetch: ${Object.keys(allMarkers).length}`);
     
-    fetch(`/api/calls?hours=${hours}`)
-        .then(response => response.json())
+    safeFetchJson(`/api/calls?hours=${hours}`)
         .then(calls => {
             console.log(`[DEBUG] Received ${calls.length} calls from server`);
             if (calls.length > 0) {
@@ -3171,7 +3194,7 @@ function createTalkgroupListItem(call) {
 
     listItem.innerHTML = `
         <span class="talkgroup-item-timestamp">${formatTimestamp(call.timestamp)}</span>
-        <p class="talkgroup-item-transcription">${call.transcription || 'No transcription available.'}</p>
+        <p class="talkgroup-item-transcription">${escapeHtml(call.transcription) || 'No transcription available.'}</p>
         <div class="talkgroup-item-audio">
             ${call.id ? `  
                 <div id="tg-waveform-${call.id}" class="waveform"></div>
@@ -3253,7 +3276,7 @@ function showTalkgroupModal(talkgroupId, talkgroupName, targetCallId = null) {
         }
 
         try {
-            const response = await fetch(`/api/talkgroup/${talkgroupId}/calls?limit=${talkgroupPageLimit}&offset=${offset}`);
+            const response = await safeFetchJson(`/api/talkgroup/${talkgroupId}/calls?limit=${talkgroupPageLimit}&offset=${offset}`);
             const calls = await response.json();
 
             if (offset === 0 && listElement.querySelector('.loading-placeholder')) {
@@ -3653,13 +3676,12 @@ function loadUsersList() {
     if (usersList) {
         usersList.innerHTML = 'Loading users...';
         
-        fetch('/api/users')
-            .then(response => response.json())
+        safeFetchJson('/api/users')
             .then(users => {
                 usersList.innerHTML = users.map(user => `
                     <div class="user-item">
                         <div class="user-info">
-                            <strong>${user.username}</strong><br>
+                            <strong>${escapeHtml(user.username)}</strong><br>
                             <small>Created: ${new Date(user.created_at).toLocaleString()}</small>
                         </div>
                         <div class="user-actions">
@@ -3784,25 +3806,24 @@ function loadSessionsList() {
         url += `?userId=${selectedUserId}`;
     }
 
-    fetch(url)
-        .then(response => response.json())
+    safeFetchJson(url)
         .then(sessions => {
             sessionsList.innerHTML = sessions.length ? sessions.map((session) => `
                 <div class="session-item ${session.token === currentSessionToken ? 'current-session' : ''}">
                     <div class="session-info">
                         <div class="session-details">
-                            <strong>${session.username}</strong>
+                            <strong>${escapeHtml(session.username)}</strong>
                             ${session.token === currentSessionToken ? ' (Current Session)' : ''}<br>
                             <small>Created: ${new Date(session.created_at).toLocaleString()}</small><br>
                             <small>Expires: ${new Date(session.expires_at).toLocaleString()}</small>
                             <div class="device-info">
-                                <small>${session.user_agent || 'Unknown Device'}</small><br>
-                                <small>IP: ${session.ip_address || 'Unknown'}</small>
+                                <small>${escapeHtml(session.user_agent) || 'Unknown Device'}</small><br>
+                                <small>IP: ${escapeHtml(session.ip_address) || 'Unknown'}</small>
                             </div>
                         </div>
                         <div class="session-actions">
                             ${session.token !== currentSessionToken ? 
-                                `<button class="terminate-session-btn" onclick="terminateSession('${session.token}')">
+                                `<button class="terminate-session-btn" data-session-token="${session.token}">
                                     Terminate
                                 </button>` : 
                                 ''
@@ -3811,6 +3832,14 @@ function loadSessionsList() {
                     </div>
                 </div>
             `).join('') : '<div class="no-sessions">No active sessions found</div>';
+
+            // Attach event listeners to terminate buttons (safer than inline onclick)
+            sessionsList.querySelectorAll('.terminate-session-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const token = this.getAttribute('data-session-token');
+                    if (token) terminateSession(token);
+                });
+            });
         })
         .catch(error => {
             console.error('Error loading sessions:', error);
@@ -3921,6 +3950,11 @@ function initializeApp() {
     
     // Initialize custom icons from config
     Object.assign(customIcons, createIconsFromConfig());
+    
+    // Apply saved user settings (if settings.js has loaded)
+    if (typeof applySavedSettings === 'function') {
+        applySavedSettings();
+    }
     
     // First ensure audio context is created
     initAudioContext();
@@ -4133,522 +4167,6 @@ function setupGlobalVolumeControl() {
     setGlobalVolume(globalVolumeLevel);
 }
 
-// Global function to set all audio volumes
-function setGlobalVolume(volume) {
-    // Clamp volume to 0-1 range
-    volume = Math.max(0, Math.min(1, parseFloat(volume)));
-    
-    // Update global variable
-    globalVolumeLevel = volume;
-    
-    // Update all gain nodes if they exist
-    if (window.audioContext && window.globalGainNode) {
-        try {
-            // Immediately set the value property
-            window.globalGainNode.gain.value = volume;
-            
-            // Also use the time-based method for smooth transitions
-            window.globalGainNode.gain.setValueAtTime(volume, window.audioContext.currentTime);
-        } catch (err) {
-            console.error("Error setting gain node volume:", err);
-        }
-    }
-    
-    // Update all wavesurfer instances in main map
-    Object.keys(wavesurfers).forEach(callId => {
-        if (wavesurfers[callId]) {
-            try {
-                wavesurfers[callId].setVolume(volume);
-            } catch (err) {
-                console.warn(`Error setting volume for wavesurfer ${callId}:`, err);
-            }
-        }
-    });
-    
-    // Update all wavesurfer instances in talkgroup modal
-    Object.keys(talkgroupModalWavesurfers).forEach(callId => {
-        if (talkgroupModalWavesurfers[callId]) {
-            try {
-                talkgroupModalWavesurfers[callId].setVolume(volume);
-            } catch (err) {
-                console.warn(`Error setting volume for modal wavesurfer ${callId}:`, err);
-            }
-        }
-    });
-    
-    // Update any volume sliders that may exist
-    const volumeSlider = document.getElementById('global-volume');
-    if (volumeSlider && volumeSlider.value !== volume.toString()) {
-        volumeSlider.value = volume;
-        updateSliderFill(volumeSlider);
-    }
-}
-
-// NEW Handler for Live Feed Updates
-function handleLiveFeedUpdate(call) {
-    // OPTIMIZATION: Skip if nothing is selected/enabled
-    if (liveFeedSelectedTalkgroups.size === 0 && !isLiveFeedAudioEnabled) {
-        // console.log("[LiveFeed] No talkgroups selected and audio disabled. Skipping update.");
-        return; 
-    }
-    
-    // console.log("[LiveFeed] handleLiveFeedUpdate triggered for call ID:", call.id);
-    const incomingTgId = parseInt(call.talk_group_id, 10); 
-
-    // Check if the talkgroup is selected
-    if (liveFeedSelectedTalkgroups.has(incomingTgId)) { 
-        // console.log(`[LiveFeed] Match found for TG ID ${incomingTgId}! Calling displayLiveFeedItem.`);
-        displayLiveFeedItem(call); // Display the item (handles audio internally)
-    } else {
-        // console.log(`[LiveFeed] Call TG ID ${incomingTgId} ignored. Selected: ${liveFeedSelectedTalkgroups.has(incomingTgId)}`);
-    }
-}
-
-// NEW: Live Feed Setup and Helper Functions
-
-function setupLiveFeed() {
-    console.log("[LiveFeed] Setting up Live Feed UI and listeners...");
-
-    // Check each element individually
-    liveFeedSetupBtn = document.getElementById('live-feed-setup-btn');
-    if (!liveFeedSetupBtn) console.error("[LiveFeed] Failed to find #live-feed-setup-btn");
-
-    liveFeedModal = document.getElementById('live-feed-modal');
-    if (!liveFeedModal) console.error("[LiveFeed] Failed to find #live-feed-modal");
-
-    liveFeedSearchInput = document.getElementById('live-feed-search');
-    if (!liveFeedSearchInput) console.error("[LiveFeed] Failed to find #live-feed-search");
-
-    liveFeedTalkgroupListContainer = document.getElementById('live-feed-talkgroup-list');
-    if (!liveFeedTalkgroupListContainer) console.error("[LiveFeed] Failed to find #live-feed-talkgroup-list");
-
-    liveFeedDisplayContainer = document.getElementById('live-feed-display');
-    if (!liveFeedDisplayContainer) console.error("[LiveFeed] Failed to find #live-feed-display");
-
-    // Check if ALL required elements were found
-    if (!liveFeedSetupBtn || !liveFeedModal || !liveFeedSearchInput || !liveFeedTalkgroupListContainer || !liveFeedDisplayContainer) {
-        console.error("[LiveFeed] Initialization failed due to missing elements.");
-        return; // Stop setup if elements are missing
-    }
-
-    console.log("[LiveFeed] All required elements found.");
-
-    // --- REMOVING DEBUG LOG ---
-    // console.log("[LiveFeed] Value of liveFeedSetupBtn before addEventListener:", liveFeedSetupBtn);
-    // --- END DEBUG LOG ---
-
-    // Listener to open the modal
-    try { // Add try-catch for more detailed error
-        liveFeedSetupBtn.addEventListener('click', openLiveFeedModal);
-    } catch (error) {
-        console.error("[LiveFeed] Error adding event listener to liveFeedSetupBtn:", error);
-        console.error("[LiveFeed] liveFeedSetupBtn value at time of error:", liveFeedSetupBtn);
-    }
-
-    // Listeners within the modal
-    // --- REMOVING DEBUG LOG ---
-    // console.log("[LiveFeed] Value of liveFeedSearchInput before addEventListener:", liveFeedSearchInput);
-    // --- END DEBUG LOG ---
-    try { // Add try-catch for more detailed error
-        liveFeedSearchInput.addEventListener('input', handleLiveFeedSearch);
-    } catch (error) {
-        console.error("[LiveFeed] Error adding event listener to liveFeedSearchInput:", error);
-        console.error("[LiveFeed] liveFeedSearchInput value at time of error:", liveFeedSearchInput);
-    }
-
-
-    // Initial state setup
-    // REMOVED: liveFeedEnableCheckbox.checked = isLiveFeedEnabled;
-    updateLiveFeedDisplayVisibility(); // Use helper function for initial state
-
-    // Fetch all talkgroups for the modal (unchanged)
-    fetch('/api/talkgroups')
-        .then(response => response.json())
-        .then(talkgroups => {
-            allLiveFeedTalkgroups = talkgroups; // Cache the list
-            console.log(`[LiveFeed] Fetched ${allLiveFeedTalkgroups.length} talkgroups.`);
-        })
-        .catch(error => {
-            console.error('[LiveFeed] Error fetching talkgroups:', error);
-            liveFeedTalkgroupListContainer.innerHTML = '<div class="loading-placeholder error">Error loading talkgroups.</div>';
-        });
-}
-
-function openLiveFeedModal() {
-    if (!liveFeedModal || !allLiveFeedTalkgroups) return;
-    console.log("[LiveFeed] Opening setup modal.");
-    liveFeedModal.style.display = 'block';
-    populateLiveFeedTalkgroups(); // Populate with current selections
-    // Ensure display state is correct when opening modal
-    liveFeedDisplayContainer.style.display = liveFeedSelectedTalkgroups.size > 0 ? 'flex' : 'none'; 
-}
-
-// Placeholder for the globally accessible close function (defined in index.html)
-function closeLiveFeedModal() { 
-    const modal = document.getElementById('live-feed-modal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-    // Ensure display state is correct when closing modal
-    if (liveFeedDisplayContainer) { // Add check for safety
-       liveFeedDisplayContainer.style.display = liveFeedSelectedTalkgroups.size > 0 ? 'flex' : 'none'; 
-    }
-}
-
-function populateLiveFeedTalkgroups() {
-    if (!liveFeedTalkgroupListContainer) return;
-
-    // Show loading state
-    liveFeedTalkgroupListContainer.innerHTML = '<div class="loading-placeholder">Loading talkgroups...</div>';
-
-    // Use requestAnimationFrame to ensure DOM updates happen after processing
-    requestAnimationFrame(() => {
-        const searchTerm = liveFeedSearchInput.value.toLowerCase();
-        
-        // Filter talkgroups based on search term
-        const filteredTalkgroups = allLiveFeedTalkgroups.filter(tg =>
-            tg.name.toLowerCase().includes(searchTerm)
-        );
-
-        if (filteredTalkgroups.length === 0) {
-            liveFeedTalkgroupListContainer.innerHTML = '<div class="loading-placeholder">No matching talkgroups found.</div>';
-            return;
-        }
-
-        // Separate selected and unselected talkgroups instead of sorting
-        const selectedTalkgroups = [];
-        const unselectedTalkgroups = [];
-
-        filteredTalkgroups.forEach(tg => {
-            if (liveFeedSelectedTalkgroups.has(tg.id)) {
-                selectedTalkgroups.push(tg);
-            } else {
-                unselectedTalkgroups.push(tg);
-            }
-        });
-
-        // Sort each group alphabetically
-        selectedTalkgroups.sort((a, b) => a.name.localeCompare(b.name));
-        unselectedTalkgroups.sort((a, b) => a.name.localeCompare(b.name));
-
-        // Limit display for performance (prioritize selected talkgroups)
-        const displaySelected = selectedTalkgroups.slice(0, MAX_TALKGROUPS_DISPLAY);
-        const remainingSlots = MAX_TALKGROUPS_DISPLAY - displaySelected.length;
-        const displayUnselected = unselectedTalkgroups.slice(0, Math.max(0, remainingSlots));
-
-        // Build HTML with separate sections
-        let html = '';
-        
-        // Selected talkgroups section
-        if (displaySelected.length > 0) {
-            html += '<div class="live-feed-section-header">Selected Talkgroups</div>';
-            html += displaySelected.map(tg => `
-                <div class="live-feed-tg-item selected">
-                    <input type="checkbox"
-                           id="live-feed-tg-${tg.id}"
-                           data-tg-id="${tg.id}"
-                           checked>
-                    <label for="live-feed-tg-${tg.id}">${tg.name}</label>
-                </div>
-            `).join('');
-        }
-
-        // Unselected talkgroups section
-        if (displayUnselected.length > 0) {
-            if (displaySelected.length > 0) {
-                html += '<div class="live-feed-section-header">Available Talkgroups</div>';
-            }
-            html += displayUnselected.map(tg => `
-                <div class="live-feed-tg-item">
-                    <input type="checkbox"
-                           id="live-feed-tg-${tg.id}"
-                           data-tg-id="${tg.id}">
-                    <label for="live-feed-tg-${tg.id}">${tg.name}</label>
-                </div>
-            `).join('');
-        }
-
-        // Show message if results were truncated
-        const totalFiltered = filteredTalkgroups.length;
-        const totalDisplayed = displaySelected.length + displayUnselected.length;
-        if (totalFiltered > totalDisplayed) {
-            html += `<div class="live-feed-truncated-message">
-                Showing ${totalDisplayed} of ${totalFiltered} talkgroups. 
-                Use search to narrow results.
-            </div>`;
-        }
-
-        // Update DOM
-        liveFeedTalkgroupListContainer.innerHTML = html;
-
-        // Add event listeners
-        liveFeedTalkgroupListContainer.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
-            checkbox.addEventListener('change', handleLiveFeedSelectionChange);
-        });
-    });
-}
-
-function handleLiveFeedSearch() {
-    // Clear existing debounce timer
-    if (liveFeedSearchDebounceTimer) {
-        clearTimeout(liveFeedSearchDebounceTimer);
-    }
-    
-    // Show loading state immediately
-    if (liveFeedTalkgroupListContainer) {
-        liveFeedTalkgroupListContainer.innerHTML = '<div class="loading-placeholder">Searching...</div>';
-    }
-    
-    // Set new debounce timer
-    liveFeedSearchDebounceTimer = setTimeout(() => {
-        populateLiveFeedTalkgroups();
-    }, LIVE_FEED_SEARCH_DEBOUNCE_DELAY);
-}
-
-function handleLiveFeedSelectionChange(event) {
-    const checkbox = event.target;
-    const talkgroupId = parseInt(checkbox.dataset.tgId, 10);
-
-    if (checkbox.checked) {
-        liveFeedSelectedTalkgroups.add(talkgroupId);
-        console.log(`[LiveFeed] Added TG ID ${talkgroupId} to selection. Current set:`, liveFeedSelectedTalkgroups);
-    } else {
-        liveFeedSelectedTalkgroups.delete(talkgroupId);
-         console.log(`[LiveFeed] Removed TG ID ${talkgroupId} from selection. Current set:`, liveFeedSelectedTalkgroups);
-    }
-    
-    // NEW: Update display based on selection size
-    updateLiveFeedDisplayVisibility(); // Call the new visibility function
-
-    // NEW: Update audio state based on selection
-    isLiveFeedAudioEnabled = liveFeedSelectedTalkgroups.size > 0;
-    console.log(`[LiveFeed] Audio state updated to: ${isLiveFeedAudioEnabled}`);
-
-    /* // OLD Logic - replaced by updateLiveFeedDisplayVisibility()
-    if (liveFeedDisplayContainer) { // Add safety check
-        liveFeedDisplayContainer.style.display = liveFeedSelectedTalkgroups.size > 0 ? 'flex' : 'none';
-        // Optional: Clear display if no TGs are selected
-        if (liveFeedSelectedTalkgroups.size === 0) {
-            liveFeedDisplayContainer.innerHTML = '';
-        }
-    }
-    */
-}
-
-// REMOVED function handleMasterEnableChange(event) { ... }
-
-function handleAudioEnableChange(event) { // (Unchanged)
-    isLiveFeedAudioEnabled = event.target.checked;
-    console.log(`[LiveFeed] Audio Enabled set to: ${isLiveFeedAudioEnabled}`);
-}
-
-// Ensure displayLiveFeedItem is defined before handleLiveFeedUpdate
-function displayLiveFeedItem(call) {
-    // MODIFIED: Removed check for isLiveFeedEnabled
-    if (!liveFeedDisplayContainer) return; 
-
-    const existingItem = liveFeedDisplayContainer.querySelector(`#live-feed-item-${call.id}`);
-    if (existingItem) {
-        // console.log(`[LiveFeed] Item ${call.id} already displayed. Skipping duplicate.`);
-        return; // Avoid adding duplicates if event fires rapidly
-    }
-
-    const newItem = document.createElement('div');
-    newItem.className = 'live-feed-item';
-    newItem.id = `live-feed-item-${call.id}`; // Assign an ID for easy targeting
-
-    // Wrap content in a span for measurement and scrolling
-    const contentSpan = document.createElement('span');
-    contentSpan.className = 'scroll-content';
-    // Initial content based on whether transcription is pending
-    const initialTranscription = (call.transcription && call.transcription !== "[Transcription Pending...]") 
-                               ? call.transcription 
-                               : "[Transcription Pending...]";
-    contentSpan.innerHTML = `<strong>${call.talk_group_name || 'Unknown TG'}</strong>: <span class="transcription-text">${initialTranscription}</span>`;
-    newItem.appendChild(contentSpan);
-
-    liveFeedDisplayContainer.prepend(newItem);
-
-    // Check for overflow AFTER adding to DOM and applying styles
-    requestAnimationFrame(() => {
-        const itemWidth = newItem.clientWidth;
-        const contentWidth = contentSpan.scrollWidth;
-        if (contentWidth > itemWidth) {
-            newItem.classList.add('scrolling');
-            const scrollSpeed = 50;
-            const duration = contentWidth / scrollSpeed;
-            contentSpan.style.animationDuration = `${Math.max(5, duration)}s`;
-        }
-    });
-
-    while (liveFeedDisplayContainer.children.length > MAX_LIVE_FEED_ITEMS) {
-        liveFeedDisplayContainer.removeChild(liveFeedDisplayContainer.lastElementChild);
-    }
-
-    // Setup removal timer
-    const removalTimeoutId = setTimeout(() => {
-        newItem.classList.add('fading-out');
-        setTimeout(() => {
-            if (newItem.parentNode === liveFeedDisplayContainer) {
-                liveFeedDisplayContainer.removeChild(newItem);
-            }
-        }, 1500);
-    }, LIVE_FEED_ITEM_DURATION - 1500);
-
-    // Retry logic if transcription is pending
-    if (initialTranscription === "[Transcription Pending...]") {
-        attemptLiveFeedRetry(call.id, newItem, 0, removalTimeoutId);
-    }
-
-    // Live Audio Logic
-    if (isLiveFeedAudioEnabled && call.id && call.transcription !== "[Transcription Pending...]") { 
-        // Only play audio if transcription is not pending initially
-        // console.log(`[LiveFeed] Attempting live audio for TG ${call.talk_group_id}, Call ${call.id}`);
-        playLiveAudio(call);
-    }
-}
-
-function attemptLiveFeedRetry(callId, itemElement, retryCount, removalTimeoutId) {
-    if (!itemElement || !itemElement.parentNode) {
-        // console.log(`[LiveFeed Retry] Item ${callId} no longer in DOM. Stopping retries.`);
-        return; // Item removed, stop retrying
-    }
-    if (retryCount >= MAX_LIVE_FEED_RETRIES) {
-        // console.log(`[LiveFeed Retry] Max retries reached for ${callId}.`);
-        return; // Max retries reached
-    }
-
-    setTimeout(async () => {
-        // Double check item is still in DOM before fetch
-        if (!itemElement || !itemElement.parentNode) return;
-
-        try {
-            // console.log(`[LiveFeed Retry] Attempt ${retryCount + 1} for call ID ${callId}`);
-            const response = await fetch(`/api/call/${callId}/details`);
-            if (!response.ok) {
-                // console.warn(`[LiveFeed Retry] API error for ${callId}: ${response.status}`);
-                // Optionally retry on certain server errors, or just give up
-                if (response.status !== 404) { // Don't retry if call truly not found
-                    // Recursive call for next attempt
-                    attemptLiveFeedRetry(callId, itemElement, retryCount + 1, removalTimeoutId);
-                }
-                return;
-            }
-            const callDetails = await response.json();
-
-            // Check again if item is still in DOM after await
-            if (!itemElement || !itemElement.parentNode) return;
-
-            if (callDetails && callDetails.transcription && callDetails.transcription !== "[Transcription Pending...]") {
-                // console.log(`[LiveFeed Retry] SUCCESS for ${callId}. New transcription: ${callDetails.transcription}`);
-                const contentSpan = itemElement.querySelector('.scroll-content');
-                const transcriptionSpan = contentSpan ? contentSpan.querySelector('.transcription-text') : null;
-                if (transcriptionSpan) {
-                    transcriptionSpan.textContent = callDetails.transcription;
-                    // Re-evaluate scrolling if content changed
-                    requestAnimationFrame(() => {
-                        const itemWidth = itemElement.clientWidth;
-                        const newContentWidth = contentSpan.scrollWidth;
-                        if (newContentWidth > itemWidth && !itemElement.classList.contains('scrolling')) {
-                            itemElement.classList.add('scrolling');
-                            const scrollSpeed = 50;
-                            const duration = newContentWidth / scrollSpeed;
-                            contentSpan.style.animationDuration = `${Math.max(5, duration)}s`;
-                        } else if (newContentWidth <= itemWidth && itemElement.classList.contains('scrolling')) {
-                            itemElement.classList.remove('scrolling');
-                            contentSpan.style.animationDuration = '';
-                        }
-                    });
-                    // Play audio now that transcription is available, if it wasn't played before
-                    if (isLiveFeedAudioEnabled && callId) { 
-                        playLiveAudio(callDetails); // Pass full details in case playLiveAudio needs more than ID
-                    }
-                }
-            } else {
-                // Still pending, retry if not maxed out
-                // console.log(`[LiveFeed Retry] Still pending for ${callId}. Retrying...`);
-                attemptLiveFeedRetry(callId, itemElement, retryCount + 1, removalTimeoutId);
-            }
-        } catch (error) {
-            console.error(`[LiveFeed Retry] Fetch error for ${callId}:`, error);
-            // Potentially retry on network errors too
-            attemptLiveFeedRetry(callId, itemElement, retryCount + 1, removalTimeoutId);
-        }
-    }, LIVE_FEED_RETRY_INTERVAL);
-}
-
-// playLiveAudio function (use window.audioContext)
-function playLiveAudio(call) {
-    // --- Ensure AudioContext exists --- 
-    if (!window.audioContext) {
-        try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            window.audioContext = new AudioContext();
-            // Need to ensure GainNode is also ready if context was just created
-            initGlobalGainNode(); 
-        } catch (e) {
-             console.error('Failed to create AudioContext:', e);
-             return; // Cannot proceed without context
-        }
-    }
-
-    // Resume if suspended
-    if (window.audioContext.state === 'suspended') { 
-        window.audioContext.resume().catch(e => console.warn('AudioContext resume failed:', e));
-    }
-    
-    const audioUrl = `/audio/${call.id}`; // Corrected: Use call.id
-    
-    fetch(audioUrl)
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            return response.arrayBuffer();
-        })
-        .then(arrayBuffer => {
-            if (!arrayBuffer || arrayBuffer.byteLength === 0) { 
-                 throw new Error("Received invalid audio data");
-            }
-            return window.audioContext.decodeAudioData(arrayBuffer); 
-        })
-        .then(audioBuffer => {
-            const source = window.audioContext.createBufferSource(); 
-            source.buffer = audioBuffer;
-            
-            if (window.globalGainNode) {
-                const destinationNode = window.globalGainNode;
-                // Force gain value to match global setting
-                destinationNode.gain.value = globalVolumeLevel;
-                
-                source.connect(destinationNode);
-                source.start(0);
-            } else {
-                // Fallback to connect directly to destination, but volume won't work
-                source.connect(window.audioContext.destination);
-                source.start(0);
-            }
-        })
-        .catch(error => {
-            console.error(`Error playing live audio for call ID ${call.id}:`, error);
-        });
-}
-
-// initGlobalGainNode function (use window.audioContext)
-// ... (existing implementation) ...
-
-// setupGlobalVolumeControl function (Unchanged)
-function setupGlobalVolumeControl() {
-    // ... (existing implementation) ...
-}
-
-// initAudioContext function (Unchanged)
-function initAudioContext() {
-    // ... (existing implementation) ...
-}
-
-// --- END Live Feed Functions ---
-
 // DEBUG: Volume testing functions
 function debugVolume(newVolume) {
     if (newVolume !== undefined) {
@@ -4796,26 +4314,6 @@ function setupVolumeControl() {
     // Add only the input and change events (no mouseup/touchend)
     newSlider.addEventListener('input', volumeChangeHandler);
     newSlider.addEventListener('change', volumeChangeHandler);
-}
-
-// --- NEW Live Feed Helper Functions ---
-
-// Shows/hides the main live feed display area based on selections
-function updateLiveFeedDisplayVisibility() {
-    if (!liveFeedDisplayContainer) return;
-    liveFeedDisplayContainer.style.display = liveFeedSelectedTalkgroups.size > 0 ? 'flex' : 'none';
-    // Optional: Clear display if no TGs are selected and it's being hidden
-    if (liveFeedSelectedTalkgroups.size === 0) {
-        liveFeedDisplayContainer.innerHTML = '';
-    }
-}
-
-// Updates the corresponding checkbox in the Live Feed setup modal
-function updateLiveFeedModalCheckbox(talkgroupId, isSelected) {
-    const modalCheckbox = document.querySelector(`#live-feed-modal #live-feed-tg-${talkgroupId}`);
-    if (modalCheckbox) {
-        modalCheckbox.checked = isSelected;
-    }
 }
 
 // --- NEW: Scroll Handling Functions --- 
